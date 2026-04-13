@@ -1,6 +1,102 @@
-# 🤖 hologram-generic-ai-agent-vs
+# 🪝 HoloClaw — hologram-holoclaw-bot-vs
 
-A modular, multi-language AI agent built with NestJS for the Hologram + Verana ecosystem. Supports LLM integration (OpenAI, Ollama, Anthropic), RAG, MCP (Model Context Protocol) servers, verifiable credential authentication, and per-user tool configuration — all driven by a single `agent-pack.yaml` manifest.
+> **OpenClaw is single-player. HoloClaw is a team.**
+>
+> A multiplayer AI workspace bot for the Hologram + Verana ecosystem. Multiple
+> verified users share a live agent session, each on their own encrypted
+> DIDComm channel. Role-based tool access. Runtime MCP server addition from
+> inside the chat (BYOMCP). Live tool execution feed broadcast to every
+> workspace member. Human-in-the-loop approval gates for sensitive tools.
+>
+> Forked from [`2060-io/hologram-generic-ai-agent-vs`](https://github.com/2060-io/hologram-generic-ai-agent-vs)
+> — full architecture spec at [`docs/HOLOCLAW_ARCHITECTURE.md`](./docs/HOLOCLAW_ARCHITECTURE.md).
+
+## ⚡ HoloClaw features (on top of the generic agent)
+
+- **Multi-tenant workspaces** — one deployment hosts many teams; each has its own `workspaceId`-keyed memory, members, invites, and tool config.
+- **Invite tokens** — admin generates, shares out-of-band, invitees paste into chat to join. Role is embedded in the token.
+- **Shared workspace memory** — every member reads/writes the same LangChain memory, with speaker tags (`[alice:collaborator]:`) so the LLM disambiguates who is talking.
+- **Four built-in roles** — `owner`, `collaborator`, `observer`, `approver`. Observer input is intercepted with a polite refusal before reaching the LLM.
+- **BYOMCP** — workspace admins paste an MCP server URL in chat; the agent connects, discovers tools, encrypts headers at rest with AES-256-GCM, and makes the tools available on the next turn.
+- **Live tool execution feed** — a LangChain `BaseCallbackHandler` broadcasts `onToolStart`/`onToolEnd`/`onToolError` to every online member via a central `BroadcastService`.
+- **Fan-out broadcast service** — single choke point for any workspace-scoped message delivery (join notifications, tool events, approval broadcasts).
+- **Full RBAC + approval workflow** — inherited from upstream; HoloClaw just adds the workspace overlay.
+- **7 new state steps** — `LOBBY`, `CREATE_WORKSPACE`, `JOIN_WORKSPACE`, `ADD_MCP_SERVER` plus the existing `AUTH`, `CHAT`, `MCP_CONFIG`.
+- **75 workspace-layer unit + integration tests** across 7 jest suites covering the full state machine, BYOMCP runtime registration with rollback, encrypted header round-trip, invite lifecycle, observer guard, and end-to-end join + broadcast.
+
+## 🪟 The viral demo
+
+1. Scan the QR → land in the **lobby**.
+2. Tap **Create workspace** → name it → send a goal → enter the workspace.
+3. Tap **Add MCP server** → paste `https://your-mcp-host/mcp` + `Bearer <token>` → the agent connects, discovers tools, and confirms `(N tools discovered)`.
+4. Tap **Invite a member** → get a single-use token, share it out-of-band.
+5. A teammate scans the bot QR, pastes the token, joins as `collaborator`. Both members see `[alice] joined as collaborator.` in real time.
+6. Ask the agent a question. Both members see `🔧 [alice] calling github/search_code…` → `✅ [alice] github/search_code complete (820ms)` live in their threads.
+7. If a tool is flagged for approval, the approver gets a badge count and taps to review.
+
+## 🗺️ Architecture snapshot
+
+```
+src/
+  ├── core/           # Extended CoreService — lobby routing, workspace state flows,
+  │                      new visibleWhen predicates, observer guard
+  ├── workspace/      # NEW — WorkspaceService, MemberService, InviteService,
+  │                      WorkspaceMcpService, entities, 42 unit tests
+  ├── broadcast/      # NEW — fan-out BroadcastService + LiveFeedCallbackHandler,
+  │                      23 unit tests
+  ├── chatbot/        # Speaker tags ([identity:role]:) prepended in multiplayer mode
+  ├── llm/            # Memory re-keyed by workspaceId, LiveFeedCallbackHandler
+  │                      wired into AgentExecutor, UserContext.workspaceId
+  ├── rbac/           # Untouched — RbacService/ApprovalService/ToolCallInterceptor
+  │                      already ship in the upstream base
+  ├── mcp/            # + addServer()/removeServer() runtime registration for BYOMCP
+  ├── rag/            # Untouched
+  ├── memory/         # Untouched (key-agnostic, now fed workspaceId from LlmService)
+  ├── config/         # agent-pack.loader extended with holoclaw.* section +
+  │                      new visibleWhen enum values
+  └── main.ts
+```
+
+## 🔑 Required environment
+
+Same as the generic agent, plus:
+
+- `MCP_CONFIG_ENCRYPTION_KEY` — 32-byte hex string used for both per-user MCP credentials and BYOMCP header encryption.
+  `openssl rand -hex 32`
+
+Optional HoloClaw-specific overrides (all have agent-pack defaults):
+
+```
+HOLOCLAW_MULTI_TENANT=true
+HOLOCLAW_MAX_WORKSPACES_PER_OWNER=10
+HOLOCLAW_INVITE_TTL_HOURS=168
+HOLOCLAW_INVITE_DEFAULT_ROLE=collaborator
+HOLOCLAW_LIVE_FEED_ENABLED=true
+HOLOCLAW_LIVE_FEED_VERBOSITY=verbose
+HOLOCLAW_SPEAKER_TAGS_ENABLED=true
+```
+
+## 🏠 Self-hosting
+
+Ready to deploy under the hologram-demos-home monorepo as the `/holoclaw` path:
+- `deploy/home-server/docker-compose.yml` has a `holoclaw-vsa` + `holoclaw-bot` service pair
+- `deploy/home-server/bots/holoclaw/.env.example` documents the required keys
+- `deploy/home-server/landing/holoclaw/index.html` is the public landing page
+- Routes: `GET /holoclaw` → landing, `/holoclaw/qr` → QR PNG, `/holoclaw/invitation` → JSON invite, `/holoclaw/dm/*` → DIDComm
+
+## 🧪 Running the test suite
+
+```bash
+pnpm install
+pnpm exec jest src/workspace src/broadcast src/core/core.service.holoclaw
+# 75 tests, ~40 seconds
+```
+
+---
+
+## 🤖 Upstream: hologram-generic-ai-agent-vs
+
+The sections below document the upstream generic agent (LLM, MCP, RAG, RBAC, approval, per-user credentials, i18n). HoloClaw inherits all of it.
 
 ---
 

@@ -1,8 +1,8 @@
 {
-  "name": "hologram-generic-ai-agent-vs",
-  "version": "1.11.2",
-  "description": "",
-  "author": "",
+  "name": "hologram-holoclaw-bot-vs",
+  "version": "0.1.0",
+  "description": "HoloClaw — multiplayer AI workspace bot for Hologram. Forked from hologram-generic-ai-agent-vs.",
+  "author": "Maxime Mansiet",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -110,6 +110,9 @@
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "moduleNameMapper": {
+      "^src/(.*)$": "<rootDir>/$1"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

@@ -1,0 +1,167 @@
+metadata:
+  id: holoclaw
+  displayName: HoloClaw
+  description: >-
+    HoloClaw — multiplayer AI workspace for Hologram. Several verified users
+    share a live agent session, each in their own encrypted DIDComm channel,
+    with role-based tool access, runtime MCP tool addition, a live tool
+    execution feed, and human-in-the-loop approval gates.
+  defaultLanguage: en
+  tags:
+    - holoclaw
+    - multiplayer
+    - workspace
+    - mcp
+
+languages:
+  en:
+    greetingMessage: >-
+      👋 Welcome to HoloClaw! This is a multiplayer AI workspace. Use the menu to
+      create a new workspace or paste an invite token to join an existing one.
+    systemPrompt: >-
+      You are HoloClaw, a multiplayer AI workspace agent. Multiple people may
+      be in this conversation — each user message may be prefixed with a
+      speaker tag like [alice:collaborator]:. Track who is talking. Be concise,
+      helpful, and keep the team's shared goal in mind. When you use tools,
+      explain what you're doing in one short sentence. If a tool requires
+      approval, tell the user their request has been submitted and they will
+      be notified when it's processed.
+  fr:
+    greetingMessage: >-
+      👋 Bienvenue sur HoloClaw ! Ceci est un workspace IA multijoueur.
+      Utilise le menu pour créer un nouveau workspace ou coller un code
+      d'invitation pour en rejoindre un existant.
+    systemPrompt: >-
+      Tu es HoloClaw, un agent IA de workspace multijoueur. Plusieurs personnes
+      peuvent participer à cette conversation — chaque message utilisateur
+      peut être préfixé par une étiquette comme [alice:collaborator]:.
+      Suis qui parle. Sois concis, utile, et garde en tête l'objectif partagé
+      de l'équipe. Quand tu utilises des outils, explique en une phrase courte
+      ce que tu fais. Si un outil nécessite une approbation, dis à l'utilisateur
+      que sa demande a été soumise et qu'il sera notifié du résultat.
+
+llm:
+  provider: ${LLM_PROVIDER}
+  model: ${LLM_MODEL}
+  temperature: 0.3
+  maxTokens: 2048
+  agentPrompt: >-
+    You are HoloClaw, a multiplayer AI workspace agent. You serve multiple
+    verified users inside a shared workspace, each connected over their own
+    encrypted DIDComm channel. Track who is talking via the [identity:role]:
+    prefix on each user message. Respect role-based tool access — the system
+    only shows you tools the current user is allowed to call. Be helpful,
+    honest, and keep the workspace's shared goal in sight.
+
+memory:
+  backend: ${AGENT_MEMORY_BACKEND}
+  window: 16
+  redisUrl: ${REDIS_URL}
+
+flows:
+  welcome:
+    enabled: true
+    sendOnProfile: true
+    templateKey: greetingMessage
+  authentication:
+    # HoloClaw MVP: credential auth is OPTIONAL. Roles come from invites by
+    # default. If credentialDefinitionId is set AND the user presents a
+    # matching credential, rolesAttribute is unioned on top (see ADR-02).
+    enabled: false
+    required: false
+    credentialDefinitionId: ${CREDENTIAL_DEFINITION_ID}
+    userIdentityAttribute: ${USER_IDENTITY_ATTRIBUTE}
+    rolesAttribute: ${ROLES_ATTRIBUTE}
+    defaultRole: collaborator
+    adminUsers: []
+  menu:
+    items:
+      # Lobby actions — visible when the user has no active workspace
+      - id: create-workspace
+        labelKey: CREATE_WORKSPACE
+        action: create-workspace
+        visibleWhen: noWorkspace
+      - id: join-workspace
+        labelKey: JOIN_WORKSPACE
+        action: join-workspace
+        visibleWhen: noWorkspace
+      # Workspace actions — visible inside an active workspace
+      - id: switch-workspace
+        labelKey: SWITCH_WORKSPACE
+        action: switch-workspace
+        visibleWhen: inWorkspace
+      - id: leave-workspace
+        labelKey: LEAVE_WORKSPACE
+        action: leave-workspace
+        visibleWhen: inWorkspace
+      # Admin actions — visible to the workspace owner
+      - id: invite-member
+        labelKey: INVITE_MEMBER
+        action: invite-member
+        visibleWhen: isWorkspaceAdmin
+      - id: add-mcp-server
+        labelKey: ADD_MCP
+        action: add-mcp-server
+        visibleWhen: isWorkspaceAdmin
+      # Approval menus — dynamic visibility based on badge counts
+      - id: my-approval-requests
+        labelKey: MY_APPROVAL_REQUESTS
+        action: my-approval-requests
+        visibleWhen: hasApprovalRequests
+        badge: approvalRequestCount
+      - id: pending-approvals
+        labelKey: PENDING_APPROVALS
+        action: pending-approvals
+        visibleWhen: hasPendingApprovals
+        badge: pendingApprovalCount
+      # Authentication (optional in MVP)
+      - id: authenticate
+        labelKey: CREDENTIAL
+        action: authenticate
+        visibleWhen: unauthenticated
+
+tools:
+  dynamicConfig: ${LLM_TOOLS_CONFIG}
+  bundled:
+    statisticsFetcher:
+      enabled: false
+
+mcp:
+  # Starter MCP servers are empty by default. Admins add their own from the
+  # chat via the "Add MCP server" menu (BYOMCP). This keeps the first-run
+  # experience clean and puts tool curation in the workspace owner's hands.
+  servers: []
+
+holoclaw:
+  workspaces:
+    multiTenant: true
+    maxPerOwner: 10
+    nameMaxLength: 120
+  invites:
+    tokenTTLHours: 168
+    defaultRole: collaborator
+    allowedRoles:
+      - collaborator
+      - observer
+      - approver
+  llmBudget:
+    perWorkspaceTurnLimitPerHour: 60
+    rejectOnExceed: true
+  liveFeed:
+    enabled: true
+    verbosity: verbose
+    broadcastToolErrors: true
+  audit:
+    retentionDays: 90
+  speakerTags:
+    enabled: true
+    format: '[{identity}:{role}]: '
+
+integrations:
+  vsAgent:
+    adminUrl: ${VS_AGENT_ADMIN_URL}
+  postgres:
+    host: ${POSTGRES_HOST}
+    user: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    dbName: ${POSTGRES_DB_NAME}
