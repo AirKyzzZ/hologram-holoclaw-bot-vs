@@ -121,6 +121,78 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * HoloClaw BYOMCP: register a new MCP server at runtime.
+   *
+   * Mirrors the onModuleInit startup flow but for a single server. Called by
+   * WorkspaceMcpService when an admin adds a server from chat. Returns the
+   * number of tools discovered on the new server so the caller can show a
+   * "n tools available" confirmation.
+   *
+   * Side effects:
+   *  - Pushes def into serverDefs
+   *  - Connects the client (shared, admin-controlled)
+   *  - Discovers tools + caches them
+   *  - Bumps toolsVersion so LlmService rebuilds its agent
+   *
+   * Throws on connection failure so the caller can roll back persistent state.
+   */
+  async addServer(def: McpServerDef): Promise<number> {
+    if (this.serverDefs.find((s) => s.name === def.name)) {
+      throw new Error(`MCP server "${def.name}" is already registered.`)
+    }
+    this.serverDefs.push(def)
+    if (def.toolAccess) this.toolAccessMap.set(def.name, def.toolAccess)
+    if (def.accessMode) this.accessModeMap.set(def.name, def.accessMode)
+
+    try {
+      await this.connectServer(def)
+    } catch (err) {
+      // Roll back registration so repeated adds don't accumulate zombies
+      this.serverDefs.splice(
+        this.serverDefs.findIndex((s) => s.name === def.name),
+        1,
+      )
+      this.toolAccessMap.delete(def.name)
+      this.accessModeMap.delete(def.name)
+      throw err
+    }
+
+    // Discover tools eagerly so the LLM sees them on the next turn
+    const conn = this.connections.find((c) => c.name === def.name)
+    let toolCount = 0
+    if (conn) {
+      await this.discoverAndCacheTools(conn, def.name)
+      toolCount = this.serverToolCache.get(def.name)?.length ?? 0
+    }
+    this._toolsVersion++
+    this.logger.log(`[ADD_SERVER] Registered "${def.name}" (${toolCount} tool(s)); toolsVersion=${this._toolsVersion}`)
+    return toolCount
+  }
+
+  /**
+   * HoloClaw BYOMCP: remove a previously-added server (runtime teardown).
+   * Closes the connection, drops cached tools, and bumps toolsVersion.
+   */
+  async removeServer(name: string): Promise<void> {
+    const idx = this.connections.findIndex((c) => c.name === name)
+    if (idx >= 0) {
+      try {
+        await this.connections[idx].client.close()
+      } catch (err) {
+        this.logger.warn(`[REMOVE_SERVER] Error closing "${name}": ${err}`)
+      }
+      this.connections.splice(idx, 1)
+    }
+    this.serverToolCache.delete(name)
+    this.toolAccessMap.delete(name)
+    this.accessModeMap.delete(name)
+    const defIdx = this.serverDefs.findIndex((s) => s.name === name)
+    if (defIdx >= 0) this.serverDefs.splice(defIdx, 1)
+    this._toolsVersion++
+    this.logger.log(`[REMOVE_SERVER] Unregistered "${name}"; toolsVersion=${this._toolsVersion}`)
+  }
+
+  /**
    * Returns tools discovered from all connected MCP servers,
    * filtered by the caller's admin status.
    *
