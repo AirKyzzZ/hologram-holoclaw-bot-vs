@@ -20,6 +20,8 @@ import { RagService } from '../rag/rag.service'
 import { McpService } from '../mcp/mcp.service'
 import { ToolCallInterceptorService } from '../rbac/tool-call-interceptor.service'
 import { RbacService, UserContext } from '../rbac/rbac.service'
+import { BroadcastService } from '../broadcast/broadcast.service'
+import { LiveFeedCallbackHandler } from '../broadcast/live-feed-callback.handler'
 
 /**
  * LlmService
@@ -78,6 +80,7 @@ export class LlmService implements OnModuleInit {
     private readonly mcpService: McpService,
     private readonly toolCallInterceptor: ToolCallInterceptorService,
     private readonly rbacService: RbacService,
+    private readonly broadcastService: BroadcastService,
   ) {
     this.agentPrompt = this.config.get<string>('appConfig.agentPrompt') ?? 'You are a helpful AI agent called Hologram.'
 
@@ -207,21 +210,47 @@ export class LlmService implements OnModuleInit {
 
         const { AgentExecutor } = await import('langchain/agents')
 
-        const memory = new LangchainSessionMemory(this.memoryService, session.connectionId)
+        // HoloClaw: memory is keyed by the active workspace so all members of
+        // the workspace share the same conversation history. Connections with
+        // no active workspace (lobby) get a per-connection ephemeral key.
+        const memoryKey = session.activeWorkspaceId ?? `lobby:${session.connectionId}`
+        const memory = new LangchainSessionMemory(this.memoryService, memoryKey)
+
+        // HoloClaw: live tool execution feed. When the session is in an active
+        // workspace, install a LangChain callback that broadcasts start/end/error
+        // events to every online member via the BroadcastService.
+        const callbacks = session.activeWorkspaceId
+          ? [
+              new LiveFeedCallbackHandler(this.broadcastService, {
+                workspaceId: session.activeWorkspaceId,
+                requesterIdentity: session.userIdentity ?? session.userName ?? session.connectionId,
+                excludeConnectionId: session.connectionId,
+                verbosity:
+                  (this.config.get<string>('appConfig.holoclaw.liveFeed.verbosity') as
+                    | 'minimal'
+                    | 'verbose'
+                    | 'debug') ?? 'verbose',
+              }),
+            ]
+          : undefined
 
         const agentExecutor = new AgentExecutor({
           agent,
           tools,
           memory,
+          callbacks,
           verbose: this.config.get<boolean>('appConfig.agentVerbose') ?? false,
         }) as any as AgentExecutor
 
-        // Build RBAC user context for ToolCallInterceptor
+        // Build RBAC user context for ToolCallInterceptor.
+        // HoloClaw: workspaceId propagates through AsyncLocalStorage to every
+        // downstream tool call, so broadcasts can find the right fan-out scope.
         const userContext: UserContext = {
           identity: session.userIdentity ?? session.userName ?? '',
           connectionId: session.connectionId,
           roles: session.userRoles ?? [],
           isAuthenticated: session.isAuthenticated ?? false,
+          workspaceId: session.activeWorkspaceId,
         }
 
         // Wrap in both RBAC context and MCP caller context

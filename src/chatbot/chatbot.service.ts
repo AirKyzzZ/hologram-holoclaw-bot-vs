@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { LlmService } from '../llm/llm.service'
 import { CHATBOT_PROMPT_TEMPLATES } from '../common/prompts/chatbot.prompts'
 import { SessionEntity } from 'src/core/models'
@@ -17,8 +18,28 @@ export class ChatbotService {
   /**
    * Constructs the ChatbotService with required dependencies.
    * @param llmService LLM interaction service (model agnostic).
+   * @param configService NestJS config service (speaker tag settings).
    */
-  constructor(private readonly llmService: LlmService) {}
+  constructor(
+    private readonly llmService: LlmService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  /**
+   * Build a speaker tag prefix for multiplayer workspaces so the LLM can
+   * disambiguate who is speaking despite a shared memory. Returns an empty
+   * string in non-workspace mode or when speaker tags are disabled.
+   */
+  private buildSpeakerTag(session: SessionEntity): string {
+    if (!session.activeWorkspaceId) return ''
+    const enabled = this.configService.get<boolean>('appConfig.holoclaw.speakerTags.enabled') ?? true
+    if (!enabled) return ''
+    const format =
+      this.configService.get<string>('appConfig.holoclaw.speakerTags.format') ?? '[{identity}:{role}]: '
+    const identity = session.userIdentity || session.userName || 'guest'
+    const role = session.userRoles?.[0] || 'member'
+    return format.replace('{identity}', identity).replace('{role}', role)
+  }
 
   /**
    * Handles a new user chat input.
@@ -45,9 +66,14 @@ export class ChatbotService {
       this.logger.log(`Using detected user language: ${userLang}`)
     }
 
+    // HoloClaw: in workspace mode, prepend a speaker tag so the LLM can
+    // disambiguate who is speaking over the shared workspace memory.
+    const speakerTag = this.buildSpeakerTag(session)
+    const taggedInput = speakerTag ? `${speakerTag}${userInput}` : userInput
+
     // Build prompt using language-appropriate template.
     const template = CHATBOT_PROMPT_TEMPLATES[userLang] || CHATBOT_PROMPT_TEMPLATES['en']
-    const prompt = template('', userInput, userName)
+    const prompt = template('', taggedInput, userName)
     this.logger.verbose(`Final prompt built for LLM:\n${prompt}`)
 
     // Call LLM to get response (memory + RAG via tools se manejan dentro de LlmService)
