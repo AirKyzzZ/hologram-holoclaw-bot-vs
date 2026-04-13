@@ -42,4 +42,15 @@ export class SessionEntity {
 
   @Column({ type: 'int', nullable: true })
   mcpConfigFieldIndex?: number
+
+  // HoloClaw: current workspace this connection is interacting with
+  @Column({ type: 'uuid', nullable: true })
+  activeWorkspaceId?: string
+
+  // HoloClaw: transient form state for CREATE_WORKSPACE / JOIN_WORKSPACE / ADD_MCP_SERVER flows
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  workspaceFlowStep?: string
+
+  @Column({ type: 'simple-json', nullable: true })
+  workspaceFlowData?: Record<string, unknown>
 }

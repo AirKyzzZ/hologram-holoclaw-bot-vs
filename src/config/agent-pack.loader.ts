@@ -108,6 +108,10 @@ const AgentPackSchema = z
                       'notConfiguring',
                       'hasApprovalRequests',
                       'hasPendingApprovals',
+                      // HoloClaw workspace predicates
+                      'inWorkspace',
+                      'noWorkspace',
+                      'isWorkspaceAdmin',
                     ])
                     .optional(),
                   badge: z.string().optional(),
@@ -178,6 +182,48 @@ const AgentPackSchema = z
       .object({
         vsAgent: z.any().optional(),
         postgres: z.any().optional(),
+      })
+      .optional(),
+    holoclaw: z
+      .object({
+        workspaces: z
+          .object({
+            multiTenant: z.union([z.boolean(), z.string()]).optional(),
+            maxPerOwner: z.union([z.number(), z.string()]).optional(),
+            nameMaxLength: z.union([z.number(), z.string()]).optional(),
+          })
+          .optional(),
+        invites: z
+          .object({
+            tokenTTLHours: z.union([z.number(), z.string()]).optional(),
+            defaultRole: z.string().optional(),
+            allowedRoles: z.array(z.string()).optional(),
+          })
+          .optional(),
+        llmBudget: z
+          .object({
+            perWorkspaceTurnLimitPerHour: z.union([z.number(), z.string()]).optional(),
+            rejectOnExceed: z.union([z.boolean(), z.string()]).optional(),
+          })
+          .optional(),
+        liveFeed: z
+          .object({
+            enabled: z.union([z.boolean(), z.string()]).optional(),
+            verbosity: z.enum(['minimal', 'verbose', 'debug']).optional(),
+            broadcastToolErrors: z.union([z.boolean(), z.string()]).optional(),
+          })
+          .optional(),
+        audit: z
+          .object({
+            retentionDays: z.union([z.number(), z.string()]).optional(),
+          })
+          .optional(),
+        speakerTags: z
+          .object({
+            enabled: z.union([z.boolean(), z.string()]).optional(),
+            format: z.string().optional(),
+          })
+          .optional(),
       })
       .optional(),
   })

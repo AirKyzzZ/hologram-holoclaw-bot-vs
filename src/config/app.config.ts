@@ -306,4 +306,57 @@ export default registerAs('appConfig', () => ({
    * Configurable via MCP_SERVERS_CONFIG env var (JSON array) or agent-pack mcp.servers.
    */
   mcpServers: resolveMcpServers(process.env.MCP_SERVERS_CONFIG, agentPack?.mcp?.servers),
+
+  /**
+   * HoloClaw — multiplayer workspace configuration.
+   * All sub-values are optional; defaults make the bot behave as a multi-tenant workspace bot.
+   */
+  holoclaw: {
+    workspaces: {
+      multiTenant: pickBoolean('HOLOCLAW_MULTI_TENANT', agentPack?.holoclaw?.workspaces?.multiTenant, true),
+      maxPerOwner: pickNumber('HOLOCLAW_MAX_WORKSPACES_PER_OWNER', agentPack?.holoclaw?.workspaces?.maxPerOwner, 10),
+      nameMaxLength: pickNumber('HOLOCLAW_WORKSPACE_NAME_MAX_LENGTH', agentPack?.holoclaw?.workspaces?.nameMaxLength, 120),
+    },
+    invites: {
+      tokenTTLHours: pickNumber('HOLOCLAW_INVITE_TTL_HOURS', agentPack?.holoclaw?.invites?.tokenTTLHours, 168),
+      defaultRole: pickString('HOLOCLAW_INVITE_DEFAULT_ROLE', agentPack?.holoclaw?.invites?.defaultRole, 'collaborator'),
+      allowedRoles:
+        (agentPack?.holoclaw?.invites?.allowedRoles as string[] | undefined) ??
+        (process.env.HOLOCLAW_INVITE_ALLOWED_ROLES
+          ? process.env.HOLOCLAW_INVITE_ALLOWED_ROLES.split(',').map((s) => s.trim()).filter(Boolean)
+          : ['collaborator', 'observer', 'approver']),
+    },
+    llmBudget: {
+      perWorkspaceTurnLimitPerHour: pickNumber(
+        'HOLOCLAW_WORKSPACE_TURN_LIMIT_HOURLY',
+        agentPack?.holoclaw?.llmBudget?.perWorkspaceTurnLimitPerHour,
+        60,
+      ),
+      rejectOnExceed: pickBoolean(
+        'HOLOCLAW_WORKSPACE_REJECT_ON_EXCEED',
+        agentPack?.holoclaw?.llmBudget?.rejectOnExceed,
+        true,
+      ),
+    },
+    liveFeed: {
+      enabled: pickBoolean('HOLOCLAW_LIVE_FEED_ENABLED', agentPack?.holoclaw?.liveFeed?.enabled, true),
+      verbosity: pickString('HOLOCLAW_LIVE_FEED_VERBOSITY', agentPack?.holoclaw?.liveFeed?.verbosity, 'verbose') as
+        | 'minimal'
+        | 'verbose'
+        | 'debug',
+      broadcastToolErrors: pickBoolean(
+        'HOLOCLAW_LIVE_FEED_BROADCAST_ERRORS',
+        agentPack?.holoclaw?.liveFeed?.broadcastToolErrors,
+        true,
+      ),
+    },
+    audit: {
+      retentionDays: pickNumber('HOLOCLAW_AUDIT_RETENTION_DAYS', agentPack?.holoclaw?.audit?.retentionDays, 90),
+    },
+    speakerTags: {
+      enabled: pickBoolean('HOLOCLAW_SPEAKER_TAGS_ENABLED', agentPack?.holoclaw?.speakerTags?.enabled, true),
+      // Format: {identity} and {role} are replaced at runtime.
+      format: pickString('HOLOCLAW_SPEAKER_TAGS_FORMAT', agentPack?.holoclaw?.speakerTags?.format, '[{identity}:{role}]: '),
+    },
+  },
 }))
