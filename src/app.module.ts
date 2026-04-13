@@ -11,6 +11,8 @@ import { CoreModule } from './core/core.module'
 import { MemoryModule } from './memory/memory.module'
 import { McpModule } from './mcp/mcp.module'
 import { RbacModule } from './rbac/rbac.module'
+import { WorkspaceModule } from './workspace/workspace.module'
+import { BroadcastModule } from './broadcast/broadcast.module'
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { RbacModule } from './rbac/rbac.module'
       isGlobal: true,
     }),
     CoreModule,
+    WorkspaceModule,
+    BroadcastModule,
     McpModule,
     RbacModule,
     LlmModule,

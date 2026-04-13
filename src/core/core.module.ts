@@ -9,6 +9,12 @@ import { MemoryModule } from 'src/memory/memory.module'
 import { AgentContentService } from './agent-content.service'
 import { McpConfigEntity } from '../mcp/mcp-config.entity'
 import { ApprovalRequestEntity } from '../rbac/approval-request.entity'
+import { WorkspaceEntity } from '../workspace/workspace.entity'
+import { WorkspaceMemberEntity } from '../workspace/workspace-member.entity'
+import { WorkspaceInviteEntity } from '../workspace/workspace-invite.entity'
+import { WorkspaceMcpServerEntity } from '../workspace/workspace-mcp-server.entity'
+import { WorkspaceModule } from '../workspace/workspace.module'
+import { BroadcastModule } from '../broadcast/broadcast.module'
 
 @Global()
 @Module({
@@ -23,7 +29,16 @@ import { ApprovalRequestEntity } from '../rbac/approval-request.entity'
         username: configService.get<string>('appConfig.postgresUser'),
         password: configService.get<string>('appConfig.postgresPassword'),
         database: configService.get<string>('appConfig.postgresDbName'),
-        entities: [ConnectionEntity, SessionEntity, McpConfigEntity, ApprovalRequestEntity],
+        entities: [
+          ConnectionEntity,
+          SessionEntity,
+          McpConfigEntity,
+          ApprovalRequestEntity,
+          WorkspaceEntity,
+          WorkspaceMemberEntity,
+          WorkspaceInviteEntity,
+          WorkspaceMcpServerEntity,
+        ],
         synchronize: true,
         ssl: false,
         logging: false,
@@ -34,6 +49,8 @@ import { ApprovalRequestEntity } from '../rbac/approval-request.entity'
     }),
     ChatbotModule,
     MemoryModule,
+    WorkspaceModule,
+    BroadcastModule,
     EventsModule,
   ],
   controllers: [],

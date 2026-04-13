@@ -9,6 +9,8 @@ export interface UserContext {
   connectionId: string
   roles: string[]
   isAuthenticated: boolean
+  // HoloClaw: active workspace the user is interacting within (undefined in LOBBY)
+  workspaceId?: string
 }
 
 @Injectable()
