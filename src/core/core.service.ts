@@ -35,6 +35,12 @@ import { McpService } from '../mcp/mcp.service'
 import { RbacService } from '../rbac/rbac.service'
 import { ApprovalService } from '../rbac/approval.service'
 import type { AuthFlowConfig } from '../config/agent-pack.loader'
+import { WorkspaceService } from '../workspace/workspace.service'
+import { WorkspaceMemberService } from '../workspace/workspace-member.service'
+import { InviteService } from '../workspace/invite.service'
+import { WorkspaceMcpService } from '../workspace/workspace-mcp.service'
+import { BroadcastService } from '../broadcast/broadcast.service'
+import { WorkspaceEntity } from '../workspace/workspace.entity'
 
 @Injectable()
 export class CoreService implements EventHandler, OnModuleInit {
@@ -53,6 +59,11 @@ export class CoreService implements EventHandler, OnModuleInit {
     private readonly mcpService: McpService,
     @Optional() private readonly rbacService: RbacService,
     @Optional() private readonly approvalService: ApprovalService,
+    private readonly workspaceService: WorkspaceService,
+    private readonly memberService: WorkspaceMemberService,
+    private readonly inviteService: InviteService,
+    private readonly workspaceMcpService: WorkspaceMcpService,
+    private readonly broadcastService: BroadcastService,
   ) {
     const baseUrl = configService.get<string>('appConfig.vsAgentAdminUrl') || 'http://localhost:3001'
     this.apiClient = new ApiClient(baseUrl, ApiVersion.V1)
@@ -132,8 +143,11 @@ export class CoreService implements EventHandler, OnModuleInit {
         }
         case MenuSelectMessage.type: {
           const rawItems = (message as any).menuItems as Array<{ id: string }> | undefined
-          if (session.state === StateStep.MCP_CONFIG && !session.mcpConfigServer && rawItems?.length) {
-            const selectedId = rawItems[0]?.id
+          const selectedId = rawItems?.[0]?.id
+          if (selectedId && selectedId.startsWith('switch-workspace:')) {
+            // HoloClaw: workspace picker selection — dispatch via handleContextualAction
+            await this.handleContextualAction(selectedId, session)
+          } else if (session.state === StateStep.MCP_CONFIG && !session.mcpConfigServer && rawItems?.length) {
             if (selectedId) {
               await this.startMcpConfigForServer(selectedId, session)
             }
@@ -176,11 +190,32 @@ export class CoreService implements EventHandler, OnModuleInit {
   /**
    * Handles the `ConnectionStateUpdated` event for establishing a new connection.
    *
-   * @param event - The event containing connection update details.
+   * HoloClaw: new connections land in LOBBY unless the user already has an
+   * active workspace membership that can be reconciled (reconnect after restart).
    */
   async newConnection(connectionId: string): Promise<void> {
     const session = await this.handleSession(connectionId)
     await this.sendStats(STAT_KPI.USER_CONNECTED, session)
+
+    // Try to reconcile an existing membership by connectionId (reconnect path)
+    try {
+      const memberships = await this.memberService.findByConnection(connectionId)
+      if (memberships.length > 0 && !session.activeWorkspaceId) {
+        session.activeWorkspaceId = memberships[0].workspaceId
+        session.state = StateStep.CHAT
+        await this.sessionRepository.save(session)
+        this.logger.log(
+          `[HOLOCLAW] Reconciled connection ${connectionId} with existing workspace ${session.activeWorkspaceId}`,
+        )
+      }
+    } catch (err) {
+      this.logger.warn(`[HOLOCLAW] Membership reconcile failed: ${err}`)
+    }
+
+    // Send welcome text for lobby users so they know what to do
+    if (session.state === StateStep.LOBBY) {
+      await this.sendText(connectionId, this.getText('LOBBY_WELCOME', session.lang), session.lang)
+    }
     await this.sendContextualMenu(session)
   }
 
@@ -254,6 +289,39 @@ export class CoreService implements EventHandler, OnModuleInit {
    */
   private async handleContextualAction(action: string, session: SessionEntity): Promise<SessionEntity> {
     const { connectionId, lang } = session
+
+    // HoloClaw: dynamic prefix-based actions (switch-workspace:<id>, invite-member:<role>, …)
+    if (action.startsWith('switch-workspace:')) {
+      await this.handleSwitchWorkspace(action.substring('switch-workspace:'.length), session)
+      return await this.sessionRepository.save(session)
+    }
+
+    // Actions available regardless of state (LOBBY or CHAT) — workspace navigation
+    if (action === 'create-workspace') {
+      await this.startCreateWorkspaceFlow(session)
+      return await this.sessionRepository.save(session)
+    }
+    if (action === 'join-workspace') {
+      await this.startJoinWorkspaceFlow(session)
+      return await this.sessionRepository.save(session)
+    }
+    if (action === 'switch-workspace') {
+      await this.showWorkspacePicker(session)
+      return await this.sessionRepository.save(session)
+    }
+    if (action === 'leave-workspace') {
+      await this.handleLeaveWorkspace(session)
+      return await this.sessionRepository.save(session)
+    }
+    if (action === 'invite-member') {
+      await this.handleCreateInvite(session)
+      return await this.sessionRepository.save(session)
+    }
+    if (action === 'add-mcp-server') {
+      await this.startAddMcpServerFlow(session)
+      return await this.sessionRepository.save(session)
+    }
+
     switch (session.state) {
       case StateStep.CHAT: {
         this.logger.debug(`this.authFlowConfig.enabled: ${this.authFlowConfig.enabled}`)
@@ -328,6 +396,63 @@ export class CoreService implements EventHandler, OnModuleInit {
     this.logger.debug(`New Message ${JSON.stringify(content)}`)
     try {
       switch (session.state) {
+        case StateStep.LOBBY:
+          if (
+            typeof content === 'object' &&
+            content !== null &&
+            'content' in content &&
+            typeof (content as Record<string, unknown>).content === 'string'
+          ) {
+            const textContent = (content as { content: string }).content.trim()
+            if (textContent.length === 0) break
+            // Convenience: if it looks like an invite token (base64url, 20+ chars, no spaces),
+            // try redeeming immediately. Otherwise nudge the user to use the menu.
+            if (/^[A-Za-z0-9_-]{20,}$/.test(textContent)) {
+              await this.tryRedeemInvite(textContent, session)
+            } else {
+              await this.sendText(connectionId, this.getText('LOBBY_NO_ACTIONS', userLang), userLang)
+            }
+          }
+          break
+
+        case StateStep.CREATE_WORKSPACE:
+          if (
+            typeof content === 'object' &&
+            content !== null &&
+            'content' in content &&
+            typeof (content as Record<string, unknown>).content === 'string'
+          ) {
+            const textContent = (content as { content: string }).content.trim()
+            await this.handleCreateWorkspaceInput(textContent, session)
+          }
+          break
+
+        case StateStep.JOIN_WORKSPACE:
+          if (
+            typeof content === 'object' &&
+            content !== null &&
+            'content' in content &&
+            typeof (content as Record<string, unknown>).content === 'string'
+          ) {
+            const textContent = (content as { content: string }).content.trim()
+            if (textContent.length > 0) {
+              await this.tryRedeemInvite(textContent, session)
+            }
+          }
+          break
+
+        case StateStep.ADD_MCP_SERVER:
+          if (
+            typeof content === 'object' &&
+            content !== null &&
+            'content' in content &&
+            typeof (content as Record<string, unknown>).content === 'string'
+          ) {
+            const textContent = (content as { content: string }).content.trim()
+            await this.handleAddMcpServerInput(textContent, session)
+          }
+          break
+
         case StateStep.CHAT:
           if (
             typeof content === 'object' &&
@@ -342,6 +467,39 @@ export class CoreService implements EventHandler, OnModuleInit {
               this.logger.log(`[GUEST] Blocked message from unauthenticated user ${connectionId}`)
               await this.sendText(connectionId, this.getText('AUTH_REQUIRED', userLang), userLang)
               break
+            }
+
+            // HoloClaw: no active workspace means the user was moved to CHAT
+            // by a legacy flow. Bounce them back to LOBBY rather than letting
+            // them talk to a connection-scoped LLM.
+            if (textContent.length > 0 && !session.activeWorkspaceId) {
+              await this.sendText(
+                connectionId,
+                this.getText('WORKSPACE_NOT_IN_WORKSPACE', userLang),
+                userLang,
+              )
+              session.state = StateStep.LOBBY
+              break
+            }
+
+            // HoloClaw observer guard: observers cannot talk to the LLM.
+            if (textContent.length > 0 && session.activeWorkspaceId) {
+              const ctx = await this.resolveWorkspaceContext(session)
+              if (ctx.memberRole === 'observer') {
+                this.logger.log(`[HOLOCLAW] Observer ${this.resolveMemberIdentity(session)} blocked in chat`)
+                await this.sendText(
+                  connectionId,
+                  this.getText('WORKSPACE_OBSERVER_READONLY', userLang),
+                  userLang,
+                )
+                break
+              }
+              // Update lastSeenAt for presence tracking
+              const member = await this.memberService.findByIdentityInWorkspace(
+                session.activeWorkspaceId,
+                this.resolveMemberIdentity(session),
+              )
+              if (member) await this.memberService.touch(member)
             }
 
             if (textContent.length > 0) {
@@ -452,9 +610,10 @@ export class CoreService implements EventHandler, OnModuleInit {
     this.logger.debug('handleSession session: ' + JSON.stringify(session))
 
     if (!session) {
+      // HoloClaw: new sessions start in LOBBY; multi-tenant is the default.
       session = this.sessionRepository.create({
         connectionId: connectionId,
-        state: StateStep.CHAT,
+        state: StateStep.LOBBY,
         isAuthenticated: false,
       })
 
@@ -462,6 +621,47 @@ export class CoreService implements EventHandler, OnModuleInit {
       this.logger.debug('New session: ' + JSON.stringify(session))
     }
     return await this.sessionRepository.save(session)
+  }
+
+  /**
+   * Resolve the member identity for a session. Falls back to connectionId when
+   * the user is unauthenticated so HoloClaw works without verifiable credentials.
+   */
+  private resolveMemberIdentity(session: SessionEntity): string {
+    return session.userIdentity || session.userName || session.connectionId
+  }
+
+  /**
+   * Is this connection the owner/admin of the active workspace?
+   * Synchronous cache via resolveWorkspaceContext; prefer that for menu resolution.
+   */
+  private async isWorkspaceAdmin(session: SessionEntity): Promise<boolean> {
+    if (!session.activeWorkspaceId) return false
+    return this.workspaceService.isOwner(session.activeWorkspaceId, this.resolveMemberIdentity(session))
+  }
+
+  /**
+   * Pre-resolve workspace context for menu visibility. Called once per menu
+   * refresh so the synchronous isMenuItemVisible() can answer role predicates.
+   */
+  private async resolveWorkspaceContext(session: SessionEntity): Promise<{
+    activeWorkspace: WorkspaceEntity | null
+    isWorkspaceAdmin: boolean
+    memberRole: string | null
+  }> {
+    if (!session.activeWorkspaceId) {
+      return { activeWorkspace: null, isWorkspaceAdmin: false, memberRole: null }
+    }
+    const identity = this.resolveMemberIdentity(session)
+    const [activeWorkspace, member] = await Promise.all([
+      this.workspaceService.findByIdOrNull(session.activeWorkspaceId),
+      this.memberService.findByIdentityInWorkspace(session.activeWorkspaceId, identity),
+    ])
+    return {
+      activeWorkspace,
+      isWorkspaceAdmin: activeWorkspace?.ownerIdentity === identity,
+      memberRole: member?.role ?? null,
+    }
   }
 
   // Special flows
@@ -496,10 +696,14 @@ export class CoreService implements EventHandler, OnModuleInit {
     // Resolve dynamic badge counts for approval menu items
     const badgeCounts = await this.resolveBadgeCounts(session)
 
+    // HoloClaw: pre-resolve workspace context so isMenuItemVisible can answer
+    // workspace-role predicates synchronously.
+    const workspaceCtx = await this.resolveWorkspaceContext(session)
+
     const options: ContextualMenuItem[] = this.menuItems
       .filter(
         (item) =>
-          this.isMenuItemVisible(item.visibleWhen, session, isConfiguring, badgeCounts) &&
+          this.isMenuItemVisible(item.visibleWhen, session, isConfiguring, badgeCounts, workspaceCtx) &&
           this.isMenuActionEnabled(item.action),
       )
       .map((item) => {
@@ -576,8 +780,14 @@ export class CoreService implements EventHandler, OnModuleInit {
     session: SessionEntity,
     isConfiguring = false,
     badgeCounts: Record<string, number> = {},
+    workspaceCtx: { isWorkspaceAdmin: boolean; memberRole: string | null; activeWorkspace: WorkspaceEntity | null } = {
+      isWorkspaceAdmin: false,
+      memberRole: null,
+      activeWorkspace: null,
+    },
   ) {
     const isAuthenticated = session.isAuthenticated ?? false
+    const inWorkspace = !!session.activeWorkspaceId
     switch (visibleWhen) {
       case 'authenticated':
         return !!isAuthenticated
@@ -591,6 +801,13 @@ export class CoreService implements EventHandler, OnModuleInit {
         return !!isAuthenticated && (badgeCounts.approvalRequestCount ?? 0) > 0
       case 'hasPendingApprovals':
         return !!isAuthenticated && (badgeCounts.pendingApprovalCount ?? 0) > 0
+      // HoloClaw predicates
+      case 'inWorkspace':
+        return inWorkspace
+      case 'noWorkspace':
+        return !inWorkspace
+      case 'isWorkspaceAdmin':
+        return inWorkspace && workspaceCtx.isWorkspaceAdmin
       default:
         return true
     }
@@ -674,6 +891,387 @@ export class CoreService implements EventHandler, OnModuleInit {
       }
     } catch (err) {
       this.logger.error(`[EVENT] Error refreshing menu for ${payload.connectionId}: ${err}`)
+    }
+  }
+
+  // ── HoloClaw Workspace Flows ─────────────────────────────────────
+
+  /**
+   * Enter CREATE_WORKSPACE state and prompt for the workspace name.
+   */
+  private async startCreateWorkspaceFlow(session: SessionEntity): Promise<void> {
+    session.state = StateStep.CREATE_WORKSPACE
+    session.workspaceFlowStep = 'name'
+    session.workspaceFlowData = {}
+    await this.sessionRepository.save(session)
+    await this.sendText(session.connectionId, this.getText('WORKSPACE_CREATE_PROMPT_NAME', session.lang), session.lang)
+  }
+
+  private async handleCreateWorkspaceInput(text: string, session: SessionEntity): Promise<void> {
+    const { lang } = session
+    const step = session.workspaceFlowStep ?? 'name'
+    const data = (session.workspaceFlowData ?? {}) as { name?: string; goal?: string }
+
+    if (step === 'name') {
+      if (!text) {
+        await this.sendText(session.connectionId, this.getText('WORKSPACE_NAME_EMPTY', lang), lang)
+        return
+      }
+      data.name = text
+      session.workspaceFlowData = data
+      session.workspaceFlowStep = 'goal'
+      await this.sessionRepository.save(session)
+      await this.sendText(session.connectionId, this.getText('WORKSPACE_CREATE_PROMPT_GOAL', lang), lang)
+      return
+    }
+
+    if (step === 'goal') {
+      const normalizedGoal = text.toLowerCase() === 'skip' ? undefined : text || undefined
+      try {
+        const workspace = await this.workspaceService.create({
+          name: data.name!,
+          goal: normalizedGoal,
+          ownerIdentity: this.resolveMemberIdentity(session),
+          ownerConnectionId: session.connectionId,
+        })
+        session.activeWorkspaceId = workspace.id
+        session.state = StateStep.CHAT
+        session.workspaceFlowStep = undefined
+        session.workspaceFlowData = undefined
+        await this.sessionRepository.save(session)
+        await this.sendText(
+          session.connectionId,
+          this.getText('WORKSPACE_CREATE_SUCCESS', lang).replace('{name}', workspace.name),
+          lang,
+        )
+      } catch (err) {
+        this.logger.error(`[HOLOCLAW] create workspace failed: ${err}`)
+        const msg = err instanceof Error ? err.message : String(err)
+        await this.sendText(session.connectionId, msg, lang)
+        session.state = StateStep.LOBBY
+        session.workspaceFlowStep = undefined
+        session.workspaceFlowData = undefined
+        await this.sessionRepository.save(session)
+      }
+    }
+  }
+
+  /**
+   * Enter JOIN_WORKSPACE state and prompt for the invite token.
+   */
+  private async startJoinWorkspaceFlow(session: SessionEntity): Promise<void> {
+    session.state = StateStep.JOIN_WORKSPACE
+    session.workspaceFlowStep = 'token'
+    await this.sessionRepository.save(session)
+    await this.sendText(session.connectionId, this.getText('WORKSPACE_JOIN_PROMPT', session.lang), session.lang)
+  }
+
+  /**
+   * Validate and redeem an invite token. Works from both JOIN_WORKSPACE state
+   * and directly-pasted LOBBY text.
+   */
+  private async tryRedeemInvite(token: string, session: SessionEntity): Promise<void> {
+    const { lang, connectionId } = session
+    try {
+      const { invite } = await this.inviteService.redeem(token)
+      const workspace = await this.workspaceService.findById(invite.workspaceId)
+      const identity = this.resolveMemberIdentity(session)
+
+      // Attach this connection to the membership (create if absent, reconnect if exists)
+      const existing = await this.memberService.findByIdentityInWorkspace(workspace.id, identity)
+      if (existing) {
+        await this.memberService.attachConnection(workspace.id, identity, connectionId)
+      } else {
+        await this.memberService.add({
+          workspaceId: workspace.id,
+          userIdentity: identity,
+          role: invite.role,
+          connectionId,
+        })
+      }
+
+      session.activeWorkspaceId = workspace.id
+      session.state = StateStep.CHAT
+      session.workspaceFlowStep = undefined
+      await this.sessionRepository.save(session)
+
+      await this.sendText(
+        connectionId,
+        this.getText('WORKSPACE_JOIN_SUCCESS', lang)
+          .replace('{name}', workspace.name)
+          .replace('{role}', invite.role),
+        lang,
+      )
+
+      // Broadcast to other members
+      const broadcastText = this.getText('WORKSPACE_JOIN_BROADCAST', lang)
+        .replace('{identity}', identity)
+        .replace('{role}', invite.role)
+      try {
+        await this.broadcastService.broadcastText({
+          workspaceId: workspace.id,
+          text: broadcastText,
+          excludeConnectionId: connectionId,
+        })
+      } catch (err) {
+        this.logger.warn(`[HOLOCLAW] Join broadcast failed: ${err}`)
+      }
+    } catch (err) {
+      this.logger.warn(`[HOLOCLAW] Invite redemption failed: ${err}`)
+      await this.sendText(connectionId, this.getText('WORKSPACE_JOIN_INVALID', lang), lang)
+      session.state = session.activeWorkspaceId ? StateStep.CHAT : StateStep.LOBBY
+      session.workspaceFlowStep = undefined
+      await this.sessionRepository.save(session)
+    }
+  }
+
+  /**
+   * Send a MenuDisplayMessage listing the user's workspaces so they can switch.
+   */
+  private async showWorkspacePicker(session: SessionEntity): Promise<void> {
+    const identity = this.resolveMemberIdentity(session)
+    const workspaces = await this.workspaceService.listForIdentity(identity)
+    if (workspaces.length === 0) {
+      await this.sendText(session.connectionId, this.getText('WORKSPACE_SWITCH_NONE', session.lang), session.lang)
+      return
+    }
+    const menuItems = workspaces.map((w) => ({
+      id: `switch-workspace:${w.id}`,
+      text: w.name,
+      action: `switch-workspace:${w.id}`,
+    }))
+    await this.apiClient.messages.send(
+      new MenuDisplayMessage({
+        connectionId: session.connectionId,
+        prompt: this.getText('WORKSPACE_SWITCH_PROMPT', session.lang),
+        menuItems,
+      }),
+    )
+  }
+
+  /**
+   * Resolve a workspace picker selection and activate it for this connection.
+   */
+  private async handleSwitchWorkspace(workspaceId: string, session: SessionEntity): Promise<void> {
+    const identity = this.resolveMemberIdentity(session)
+    const member = await this.memberService.findByIdentityInWorkspace(workspaceId, identity)
+    if (!member) {
+      this.logger.warn(`[HOLOCLAW] switch-workspace: ${identity} is not a member of ${workspaceId}`)
+      await this.sendText(session.connectionId, this.getText('WORKSPACE_SWITCH_NONE', session.lang), session.lang)
+      return
+    }
+    await this.memberService.attachConnection(workspaceId, identity, session.connectionId)
+    const workspace = await this.workspaceService.findById(workspaceId)
+    session.activeWorkspaceId = workspaceId
+    session.state = StateStep.CHAT
+    session.workspaceFlowStep = undefined
+    await this.sessionRepository.save(session)
+    await this.sendText(
+      session.connectionId,
+      this.getText('WORKSPACE_SWITCH_SUCCESS', session.lang).replace('{name}', workspace.name),
+      session.lang,
+    )
+  }
+
+  /**
+   * Return to LOBBY without destroying membership rows.
+   */
+  private async handleLeaveWorkspace(session: SessionEntity): Promise<void> {
+    session.activeWorkspaceId = undefined
+    session.state = StateStep.LOBBY
+    session.workspaceFlowStep = undefined
+    await this.sessionRepository.save(session)
+    await this.sendText(session.connectionId, this.getText('WORKSPACE_LEAVE_SUCCESS', session.lang), session.lang)
+  }
+
+  /**
+   * Admin creates a single-use invite token for the active workspace.
+   * MVP: immediate issuance with the default role, no role-selection detour.
+   */
+  private async handleCreateInvite(session: SessionEntity): Promise<void> {
+    if (!session.activeWorkspaceId) {
+      await this.sendText(session.connectionId, this.getText('WORKSPACE_NOT_IN_WORKSPACE', session.lang), session.lang)
+      return
+    }
+    const isAdmin = await this.isWorkspaceAdmin(session)
+    if (!isAdmin) {
+      await this.sendText(session.connectionId, this.getText('WORKSPACE_NOT_ADMIN', session.lang), session.lang)
+      return
+    }
+    const role = this.configService.get<string>('appConfig.holoclaw.invites.defaultRole') ?? 'collaborator'
+    const ttlHours = this.configService.get<number>('appConfig.holoclaw.invites.tokenTTLHours') ?? 168
+    try {
+      const invite = await this.inviteService.create({
+        workspaceId: session.activeWorkspaceId,
+        role,
+        issuedBy: this.resolveMemberIdentity(session),
+      })
+      await this.sendText(
+        session.connectionId,
+        this.getText('WORKSPACE_INVITE_CREATED', session.lang)
+          .replace('{token}', invite.token)
+          .replace('{role}', role)
+          .replace('{hours}', String(ttlHours)),
+        session.lang,
+      )
+    } catch (err) {
+      this.logger.error(`[HOLOCLAW] create invite failed: ${err}`)
+      const msg = err instanceof Error ? err.message : String(err)
+      await this.sendText(session.connectionId, msg, session.lang)
+    }
+  }
+
+  /**
+   * Begin the ADD_MCP_SERVER form flow. Admin only.
+   * NOTE: the final save step is wired in the BYOMCP iteration; this prompt-chain
+   * is ready to accept inputs but will return a "coming soon" message until the
+   * WorkspaceMcpService is implemented.
+   */
+  private async startAddMcpServerFlow(session: SessionEntity): Promise<void> {
+    if (!session.activeWorkspaceId) {
+      await this.sendText(session.connectionId, this.getText('WORKSPACE_NOT_IN_WORKSPACE', session.lang), session.lang)
+      return
+    }
+    const isAdmin = await this.isWorkspaceAdmin(session)
+    if (!isAdmin) {
+      await this.sendText(session.connectionId, this.getText('WORKSPACE_NOT_ADMIN', session.lang), session.lang)
+      return
+    }
+    session.state = StateStep.ADD_MCP_SERVER
+    session.workspaceFlowStep = 'name'
+    session.workspaceFlowData = {}
+    await this.sessionRepository.save(session)
+    await this.sendText(
+      session.connectionId,
+      this.getText('WORKSPACE_ADD_MCP_PROMPT_NAME', session.lang),
+      session.lang,
+    )
+  }
+
+  private async handleAddMcpServerInput(text: string, session: SessionEntity): Promise<void> {
+    const step = session.workspaceFlowStep ?? 'name'
+    const data = (session.workspaceFlowData ?? {}) as { name?: string; url?: string; header?: string }
+
+    if (step === 'name') {
+      data.name = text
+      session.workspaceFlowData = data
+      session.workspaceFlowStep = 'url'
+      await this.sessionRepository.save(session)
+      await this.sendText(
+        session.connectionId,
+        this.getText('WORKSPACE_ADD_MCP_PROMPT_URL', session.lang),
+        session.lang,
+      )
+      return
+    }
+    if (step === 'url') {
+      data.url = text
+      session.workspaceFlowData = data
+      session.workspaceFlowStep = 'header'
+      await this.sessionRepository.save(session)
+      await this.sendText(
+        session.connectionId,
+        this.getText('WORKSPACE_ADD_MCP_PROMPT_HEADER', session.lang),
+        session.lang,
+      )
+      return
+    }
+    if (step === 'header') {
+      const header = text.toLowerCase() === 'skip' ? undefined : text
+      await this.finalizeAddMcpServer(session, data.name!, data.url!, header)
+    }
+  }
+
+  /**
+   * BYOMCP: register the workspace-scoped MCP server at runtime.
+   * Supports streamable-http URLs (https://…) and sse URLs (sse://…).
+   * On success: broadcasts the addition to all workspace members and returns
+   * the user to CHAT state with a success confirmation.
+   */
+  private async finalizeAddMcpServer(
+    session: SessionEntity,
+    name: string,
+    url: string,
+    header: string | undefined,
+  ): Promise<void> {
+    const { lang, connectionId, activeWorkspaceId } = session
+    if (!activeWorkspaceId) return
+
+    const reset = async (failureMessage?: string) => {
+      session.state = StateStep.CHAT
+      session.workspaceFlowStep = undefined
+      session.workspaceFlowData = undefined
+      await this.sessionRepository.save(session)
+      if (failureMessage) {
+        await this.sendText(
+          connectionId,
+          this.getText('WORKSPACE_ADD_MCP_FAILED', lang)
+            .replace('{name}', name)
+            .replace('{reason}', failureMessage),
+          lang,
+        )
+      }
+    }
+
+    // Pick transport + normalize URL
+    let transport: 'streamable-http' | 'sse'
+    let normalizedUrl = url
+    if (url.startsWith('sse://')) {
+      transport = 'sse'
+      normalizedUrl = 'http' + url.substring(3) // sse://host → http://host
+    } else if (url.startsWith('http://') || url.startsWith('https://')) {
+      transport = 'streamable-http'
+    } else {
+      await reset(`unsupported URL scheme "${url.slice(0, 16)}…"`)
+      return
+    }
+
+    // Build headers (optional auth)
+    const headers: Record<string, string> = {}
+    if (header) {
+      const [headerName, ...rest] = header.includes(':')
+        ? header.split(':').map((s) => s.trim())
+        : ['Authorization', header]
+      headers[headerName || 'Authorization'] = rest.length ? rest.join(':').trim() : header
+    }
+
+    try {
+      const result = await this.workspaceMcpService.add({
+        workspaceId: activeWorkspaceId,
+        name,
+        transport,
+        url: normalizedUrl,
+        headers,
+        addedBy: this.resolveMemberIdentity(session),
+      })
+      session.state = StateStep.CHAT
+      session.workspaceFlowStep = undefined
+      session.workspaceFlowData = undefined
+      await this.sessionRepository.save(session)
+      await this.sendText(
+        connectionId,
+        this.getText('WORKSPACE_ADD_MCP_SUCCESS', lang)
+          .replace('{name}', name)
+          .replace('{tools}', String(result.toolCount)),
+        lang,
+      )
+      // Broadcast to all other workspace members
+      try {
+        await this.broadcastService.broadcastText({
+          workspaceId: activeWorkspaceId,
+          text: this.getText('WORKSPACE_ADD_MCP_BROADCAST', lang)
+            .replace('{identity}', this.resolveMemberIdentity(session))
+            .replace('{name}', name)
+            .replace('{tools}', String(result.toolCount)),
+          excludeConnectionId: connectionId,
+        })
+      } catch (err) {
+        this.logger.warn(`[BYOMCP] broadcast failed: ${err}`)
+      }
+    } catch (err) {
+      this.logger.error(`[BYOMCP] finalizeAddMcpServer failed: ${err}`)
+      const reason = err instanceof Error ? err.message : String(err)
+      await reset(reason)
     }
   }
 
