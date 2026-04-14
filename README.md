@@ -1,25 +1,35 @@
-<img src="./logo.png" width="180" align="right" alt="HoloClaw logo" />
+<p align="center">
+  <img src="./logo.png" width="180" alt="HoloClaw logo" />
+</p>
 
-# 🪝 HoloClaw
+<h1 align="center">🪝 HoloClaw</h1>
 
-> **OpenClaw is single-player. HoloClaw is a team.**
+<p align="center">
+  <strong>OpenClaw is single-player. HoloClaw is a team.</strong>
+</p>
 
-A **multiplayer AI workspace agent** for the [Hologram](https://hologram.zone) + [2060.io](https://2060.io) DIDComm stack.
-Multiple verified users share one live LangChain session, each on their own encrypted channel, with role-based tool access, runtime MCP curation, a live tool execution feed, and human-in-the-loop approval gates.
+<p align="center">
+  A <strong>multiplayer AI workspace agent</strong> for the <a href="https://hologram.zone">Hologram</a> + <a href="https://2060.io">2060.io</a> DIDComm stack.<br>
+  Multiple verified users share one live LangChain session, each on their own encrypted channel,<br>
+  with role-based tool access, runtime MCP curation, a live tool execution feed,<br>
+  and human-in-the-loop approval gates.
+</p>
 
-[![Tests](https://img.shields.io/badge/tests-75%20passing-brightgreen)](#-testing)
-[![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)](https://nestjs.com)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![LangChain](https://img.shields.io/badge/LangChain-0.3.26-1C3C3C?logo=langchain&logoColor=white)](https://js.langchain.com)
-[![MCP SDK](https://img.shields.io/badge/MCP%20SDK-1.29-4CAF50)](https://github.com/modelcontextprotocol/sdk)
-[![DIDComm](https://img.shields.io/badge/DIDComm-v2-blueviolet)](https://identity.foundation/didcomm-messaging/spec/)
-[![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql&logoColor=white)](https://postgresql.org)
-[![Redis](https://img.shields.io/badge/Redis-7.4-DC382D?logo=redis&logoColor=white)](https://redis.io)
-[![AES-256-GCM](https://img.shields.io/badge/crypto-AES--256--GCM-black)](./src/workspace/workspace-mcp.service.ts)
-[![Node.js](https://img.shields.io/badge/Node.js-23--alpine-339933?logo=node.js&logoColor=white)](https://nodejs.org)
-[![Forked from](https://img.shields.io/badge/forked%20from-2060--io%2Fhologram--generic--ai--agent--vs-lightgrey)](https://github.com/2060-io/hologram-generic-ai-agent-vs)
-[![Built for Hologram](https://img.shields.io/badge/built%20for-Hologram-ff69b4)](https://hologram.zone)
+<p align="center">
+  <a href="#-testing"><img src="https://img.shields.io/badge/tests-75%20passing-brightgreen" alt="Tests"></a>
+  <a href="https://nestjs.com"><img src="https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white" alt="NestJS"></a>
+  <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript"></a>
+  <a href="https://js.langchain.com"><img src="https://img.shields.io/badge/LangChain-0.3.26-1C3C3C?logo=langchain&logoColor=white" alt="LangChain"></a>
+  <a href="https://github.com/modelcontextprotocol/sdk"><img src="https://img.shields.io/badge/MCP%20SDK-1.29-4CAF50" alt="MCP SDK"></a>
+  <a href="https://identity.foundation/didcomm-messaging/spec/"><img src="https://img.shields.io/badge/DIDComm-v2-blueviolet" alt="DIDComm"></a>
+  <a href="https://docs.docker.com/compose/"><img src="https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white" alt="Docker"></a>
+  <a href="https://postgresql.org"><img src="https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql&logoColor=white" alt="PostgreSQL"></a>
+  <a href="https://redis.io"><img src="https://img.shields.io/badge/Redis-7.4-DC382D?logo=redis&logoColor=white" alt="Redis"></a>
+  <a href="./src/workspace/workspace-mcp.service.ts"><img src="https://img.shields.io/badge/crypto-AES--256--GCM-black" alt="AES-256-GCM"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-23--alpine-339933?logo=node.js&logoColor=white" alt="Node.js"></a>
+  <a href="https://github.com/2060-io/hologram-generic-ai-agent-vs"><img src="https://img.shields.io/badge/forked%20from-2060--io%2Fhologram--generic--ai--agent--vs-lightgrey" alt="Forked from"></a>
+  <a href="https://hologram.zone"><img src="https://img.shields.io/badge/built%20for-Hologram-ff69b4" alt="Built for Hologram"></a>
+</p>
 
 ---
 
