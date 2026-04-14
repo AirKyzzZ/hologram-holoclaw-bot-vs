@@ -1,587 +1,319 @@
-# 🪝 HoloClaw — hologram-holoclaw-bot-vs
+<img src="./logo.png" width="180" align="right" alt="HoloClaw logo" />
+
+# 🪝 HoloClaw
 
 > **OpenClaw is single-player. HoloClaw is a team.**
->
-> A multiplayer AI workspace bot for the Hologram + Verana ecosystem. Multiple
-> verified users share a live agent session, each on their own encrypted
-> DIDComm channel. Role-based tool access. Runtime MCP server addition from
-> inside the chat (BYOMCP). Live tool execution feed broadcast to every
-> workspace member. Human-in-the-loop approval gates for sensitive tools.
->
-> Forked from [`2060-io/hologram-generic-ai-agent-vs`](https://github.com/2060-io/hologram-generic-ai-agent-vs)
-> — full architecture spec at [`docs/HOLOCLAW_ARCHITECTURE.md`](./docs/HOLOCLAW_ARCHITECTURE.md).
 
-## ⚡ HoloClaw features (on top of the generic agent)
+A **multiplayer AI workspace agent** for the [Hologram](https://hologram.zone) + [2060.io](https://2060.io) DIDComm stack.
+Multiple verified users share one live LangChain session, each on their own encrypted channel, with role-based tool access, runtime MCP curation, a live tool execution feed, and human-in-the-loop approval gates.
 
-- **Multi-tenant workspaces** — one deployment hosts many teams; each has its own `workspaceId`-keyed memory, members, invites, and tool config.
-- **Invite tokens** — admin generates, shares out-of-band, invitees paste into chat to join. Role is embedded in the token.
-- **Shared workspace memory** — every member reads/writes the same LangChain memory, with speaker tags (`[alice:collaborator]:`) so the LLM disambiguates who is talking.
-- **Four built-in roles** — `owner`, `collaborator`, `observer`, `approver`. Observer input is intercepted with a polite refusal before reaching the LLM.
-- **BYOMCP** — workspace admins paste an MCP server URL in chat; the agent connects, discovers tools, encrypts headers at rest with AES-256-GCM, and makes the tools available on the next turn.
-- **Live tool execution feed** — a LangChain `BaseCallbackHandler` broadcasts `onToolStart`/`onToolEnd`/`onToolError` to every online member via a central `BroadcastService`.
-- **Fan-out broadcast service** — single choke point for any workspace-scoped message delivery (join notifications, tool events, approval broadcasts).
-- **Full RBAC + approval workflow** — inherited from upstream; HoloClaw just adds the workspace overlay.
-- **7 new state steps** — `LOBBY`, `CREATE_WORKSPACE`, `JOIN_WORKSPACE`, `ADD_MCP_SERVER` plus the existing `AUTH`, `CHAT`, `MCP_CONFIG`.
-- **75 workspace-layer unit + integration tests** across 7 jest suites covering the full state machine, BYOMCP runtime registration with rollback, encrypted header round-trip, invite lifecycle, observer guard, and end-to-end join + broadcast.
+[![Tests](https://img.shields.io/badge/tests-75%20passing-brightgreen)](#-testing)
+[![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)](https://nestjs.com)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![LangChain](https://img.shields.io/badge/LangChain-0.3.26-1C3C3C?logo=langchain&logoColor=white)](https://js.langchain.com)
+[![MCP SDK](https://img.shields.io/badge/MCP%20SDK-1.29-4CAF50)](https://github.com/modelcontextprotocol/sdk)
+[![DIDComm](https://img.shields.io/badge/DIDComm-v2-blueviolet)](https://identity.foundation/didcomm-messaging/spec/)
+[![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql&logoColor=white)](https://postgresql.org)
+[![Redis](https://img.shields.io/badge/Redis-7.4-DC382D?logo=redis&logoColor=white)](https://redis.io)
+[![AES-256-GCM](https://img.shields.io/badge/crypto-AES--256--GCM-black)](./src/workspace/workspace-mcp.service.ts)
+[![Node.js](https://img.shields.io/badge/Node.js-23--alpine-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Forked from](https://img.shields.io/badge/forked%20from-2060--io%2Fhologram--generic--ai--agent--vs-lightgrey)](https://github.com/2060-io/hologram-generic-ai-agent-vs)
+[![Built for Hologram](https://img.shields.io/badge/built%20for-Hologram-ff69b4)](https://hologram.zone)
 
-## 🪟 The viral demo
+---
 
-1. Scan the QR → land in the **lobby**.
-2. Tap **Create workspace** → name it → send a goal → enter the workspace.
-3. Tap **Add MCP server** → paste `https://your-mcp-host/mcp` + `Bearer <token>` → the agent connects, discovers tools, and confirms `(N tools discovered)`.
-4. Tap **Invite a member** → get a single-use token, share it out-of-band.
-5. A teammate scans the bot QR, pastes the token, joins as `collaborator`. Both members see `[alice] joined as collaborator.` in real time.
-6. Ask the agent a question. Both members see `🔧 [alice] calling github/search_code…` → `✅ [alice] github/search_code complete (820ms)` live in their threads.
-7. If a tool is flagged for approval, the approver gets a badge count and taps to review.
+## 🎬 The 30-second demo
 
-## 🗺️ Architecture snapshot
+1. **Scan the QR** on the landing page with the [Hologram iOS/Android app](https://hologram.zone) → a new DIDComm channel opens to the bot.
+2. **You land in the `LOBBY`** state ([`state-step.enum.ts`](./src/core/common/enums/state-step.enum.ts)) and get a welcome message + two buttons: *Create workspace* / *Join with invite*.
+3. **Tap "Create workspace"** → name it → send a goal → a `WorkspaceEntity` is persisted, you become the owner, and you're in `CHAT` with shared workspace memory.
+4. **Tap "Add MCP server"** → paste `https://your-mcp-host/mcp` + `Bearer <token>` → [`WorkspaceMcpService.add()`](./src/workspace/workspace-mcp.service.ts) encrypts the header with AES-256-GCM, registers the server at runtime via [`McpService.addServer()`](./src/mcp/mcp.service.ts), discovers tools, and confirms `(N tools discovered)`.
+5. **Tap "Invite a member"** → `InviteService` generates a single-use token → share it out-of-band with a teammate.
+6. **Teammate scans the bot QR, pastes the token** → [`InviteService.redeem()`](./src/workspace/invite.service.ts) validates, creates a `WorkspaceMemberEntity`, and [`BroadcastService.broadcastText()`](./src/broadcast/broadcast.service.ts) fan-outs `👋 [alice] joined as collaborator.` to every online member.
+7. **Ask the agent anything.** Both members see `🔧 [alice] calling github/search_code…` → `✅ [alice] github/search_code complete (820ms)` live in their threads, broadcast by the [`LiveFeedCallbackHandler`](./src/broadcast/live-feed-callback.handler.ts) installed on the LangChain `AgentExecutor`. If a tool requires approval, the approver gets a menu badge and taps to decide.
+
+**That's a 30-second flow that's impossible to replicate in ChatGPT, Claude, or OpenClaw.** DIDComm is point-to-point by design, so multiplayer happens in the fan-out layer — that's the architectural heart of HoloClaw.
+
+---
+
+## ✨ What makes HoloClaw different
+
+### Novel in the Hologram / DIDComm ecosystem
+
+| Feature | Where it lives | Why it matters |
+|---|---|---|
+| **Shared workspace memory** keyed by `workspaceId`, not `connectionId` | [`src/llm/llm.service.ts`](./src/llm/llm.service.ts) | All members read/write the same LangChain memory. One cognitive context, many speakers. |
+| **Speaker-tag disambiguation** over shared memory | [`src/chatbot/chatbot.service.ts`](./src/chatbot/chatbot.service.ts) | `[alice:collaborator]: <msg>` is prepended so the LLM knows who spoke. Format is configurable. |
+| **Single tool choke point** — `ToolCallInterceptor` | [`src/rbac/tool-call-interceptor.service.ts`](./src/rbac/tool-call-interceptor.service.ts) | RBAC / approval / audit / broadcast all funnel through one method. No tool escapes the gate. |
+| **Runtime MCP server registration with rollback** | [`src/workspace/workspace-mcp.service.ts`](./src/workspace/workspace-mcp.service.ts) | Admins paste URL + token in chat, get tools in seconds. Rollback on connect failure prevents zombie rows. |
+| **Workspace-slug collision avoidance** (`ws-<8chars>-<name>`) | [`src/workspace/workspace-mcp.service.ts`](./src/workspace/workspace-mcp.service.ts) | Two workspaces can register servers named "github" without colliding in the global MCP tool list. |
+| **AES-256-GCM encryption at rest** for BYOMCP headers | [`src/workspace/workspace-mcp.service.ts`](./src/workspace/workspace-mcp.service.ts) | Same primitive as the base agent's `McpConfigService` — one key, one algorithm, no duplication. |
+| **Fan-out `BroadcastService`** with bounded concurrency | [`src/broadcast/broadcast.service.ts`](./src/broadcast/broadcast.service.ts) | Best-effort per-member delivery; one failure doesn't block the rest. Used for joins, tool events, approvals. |
+| **Live-feed LangChain `BaseCallbackHandler`** | [`src/broadcast/live-feed-callback.handler.ts`](./src/broadcast/live-feed-callback.handler.ts) | `onToolStart`/`onToolEnd`/`onToolError` broadcast with three verbosity levels. Shared AI in real time. |
+| **Invite tokens**: single-use or multi-use, TTL, revocable, role-granting | [`src/workspace/invite.service.ts`](./src/workspace/invite.service.ts) | Join a workspace in 30 seconds without a credential wallet dance. |
+| **Observer guard** with friendly read-only refusal | [`src/core/core.service.ts`](./src/core/core.service.ts) (`handleStateInput` CHAT branch) | Observers see everything but their input is intercepted before the LLM, with a polite message — not silent drops. |
+
+### Design decisions (see [`docs/HOLOCLAW_ARCHITECTURE.md`](./docs/HOLOCLAW_ARCHITECTURE.md) for the full ADRs)
+
+| # | Decision | One-liner |
+|---|---|---|
+| **ADR-01** | Invite tokens for MVP; workspace credentials as V2 opt-in | Tokens are cheap and viral; credentials add a wallet detour that kills the demo. |
+| **ADR-02** | Hybrid role source: invite-granted primary, credential `rolesAttribute` UNIONed | MVP teams run without credential infra; teams with issuance get automatic role promotion on top. |
+| **ADR-03** | Fully shared memory per workspace | The "we're in this together" punchline only works if every member sees the same AI context. |
+| **ADR-04** | BYOK deferred to V2 | Per-workspace LLM keys are a 3–5 day refactor; MVP ships a shared key with per-workspace rate limiting. |
+| **ADR-05** | Observers are silent read-only receivers | Read-only with friendly refusal is less confusing than silent drops. |
+| **ADR-06** | Multi-tenant from day one | Single-workspace is a degenerate case; the marginal cost is mostly `WHERE workspaceId = ?`. |
+
+---
+
+## 🏗 Architecture
+
+```
+                    ┌──────────────────────────┐
+                    │      Hologram app        │   (iPhone / Android wallet)
+                    └────────────┬─────────────┘
+                                 │ DIDComm v2 (point-to-point, E2E)
+                    ┌────────────▼─────────────┐
+                    │   vs-agent :3001         │   @2060.io/vs-agent-nestjs-client 1.5.5
+                    └────────────┬─────────────┘
+                                 │ webhook (EVENTS_BASE_URL)
+                    ┌────────────▼─────────────┐
+                    │    HoloClaw (NestJS 11)  │
+                    │  ┌───────────────────┐   │
+                    │  │   CoreService     │   │  ← extended state machine
+                    │  │   LOBBY → CHAT    │   │     8 states incl. workspace flows
+                    │  └────┬─────────┬────┘   │
+                    │       ▼         ▼        │
+                    │   🪝 Workspace  🪝 Broad-│  ← HoloClaw overlay
+                    │     Service     cast +   │     (new code)
+                    │     Member      LiveFeed │
+                    │     Invite      Callback │
+                    │     McpService  Handler  │
+                    │                          │
+                    │   ToolCallInterceptor    │  ← RBAC + approval
+                    │           │              │     (inherited upstream)
+                    │           ▼              │
+                    │   LlmService (LangChain) │
+                    │     + AgentExecutor      │
+                    │           │              │
+                    │           ▼              │
+                    │   MemoryService          │  ← keyed by workspaceId
+                    │   (Redis or in-memory)   │     (one-line HoloClaw change)
+                    └──────────────────────────┘
+                               │ fan-out (BroadcastService)
+                               ▼
+                   Other workspace members
+                   (each on their own DIDComm channel)
+```
+
+### Directory tree
 
 ```
 src/
-  ├── core/           # Extended CoreService — lobby routing, workspace state flows,
-  │                      new visibleWhen predicates, observer guard
-  ├── workspace/      # NEW — WorkspaceService, MemberService, InviteService,
-  │                      WorkspaceMcpService, entities, 42 unit tests
-  ├── broadcast/      # NEW — fan-out BroadcastService + LiveFeedCallbackHandler,
-  │                      23 unit tests
-  ├── chatbot/        # Speaker tags ([identity:role]:) prepended in multiplayer mode
-  ├── llm/            # Memory re-keyed by workspaceId, LiveFeedCallbackHandler
-  │                      wired into AgentExecutor, UserContext.workspaceId
-  ├── rbac/           # Untouched — RbacService/ApprovalService/ToolCallInterceptor
-  │                      already ship in the upstream base
-  ├── mcp/            # + addServer()/removeServer() runtime registration for BYOMCP
-  ├── rag/            # Untouched
-  ├── memory/         # Untouched (key-agnostic, now fed workspaceId from LlmService)
-  ├── config/         # agent-pack.loader extended with holoclaw.* section +
-  │                      new visibleWhen enum values
+  ├── 🪝 workspace/        NEW — entities, services, BYOMCP crypto, 50 tests
+  │     ├── workspace.entity.ts            Workspace owner + name + goal
+  │     ├── workspace-member.entity.ts     connectionId + role + lastSeenAt
+  │     ├── workspace-invite.entity.ts     single/multi-use tokens + TTL
+  │     ├── workspace-mcp-server.entity.ts AES-256-GCM encrypted headers
+  │     ├── workspace.service.ts           CRUD + maxPerOwner enforcement
+  │     ├── workspace-member.service.ts    add/rolesFor/onlineMembers
+  │     ├── invite.service.ts              create/redeem/revoke
+  │     └── workspace-mcp.service.ts       BYOMCP add/remove/restore
+  │
+  ├── 🪝 broadcast/        NEW — fan-out + live tool feed, 23 tests
+  │     ├── broadcast.service.ts           bounded-concurrency fan-out
+  │     └── live-feed-callback.handler.ts  LangChain BaseCallbackHandler
+  │
+  ├── core/                CoreService extended with workspace state flows,
+  │                          new visibleWhen predicates, observer guard
+  ├── chatbot/             Speaker-tag prepending for workspace mode
+  ├── llm/                 Memory re-keyed to workspaceId + LiveFeed wired
+  ├── mcp/                 + addServer() / removeServer() runtime API
+  ├── rbac/                Unchanged — UserContext extended with workspaceId
+  ├── rag/                 Unchanged — inherited from upstream
+  ├── memory/              Unchanged — key-agnostic, fed workspaceId now
+  ├── config/              agent-pack.loader extended with holoclaw.* section
   └── main.ts
+
+agent-packs/
+  └── 🪝 holoclaw/         NEW — HoloClaw-specific agent pack
+        └── agent-pack.yaml  menu items, workspace limits, liveFeed, speakerTags
+
+docs/
+  ├── 🪝 HOLOCLAW_ARCHITECTURE.md  Full 6-ADR spec, data model, component inventory
+  ├── agent-pack-schema.md          (upstream)
+  ├── rbac-approval-spec.md         (upstream — implemented in the base agent)
+  └── …
 ```
 
-## 🔑 Required environment
+🪝 = new in HoloClaw. Everything else is inherited from [`hologram-generic-ai-agent-vs`](https://github.com/2060-io/hologram-generic-ai-agent-vs) and continues to work unchanged.
 
-Same as the generic agent, plus:
+---
 
-- `MCP_CONFIG_ENCRYPTION_KEY` — 32-byte hex string used for both per-user MCP credentials and BYOMCP header encryption.
-  `openssl rand -hex 32`
+## 🧱 Stack
 
-Optional HoloClaw-specific overrides (all have agent-pack defaults):
+| Layer | Technology | Version | Notes |
+|---|---|---|---|
+| Runtime | Node.js | `23-alpine` | Multi-stage Dockerfile |
+| Framework | [NestJS](https://nestjs.com) | `^11.0.1` | Modular, DI-first |
+| Language | TypeScript | `^5.7.3` | `strict` mode |
+| LLM orchestration | [LangChain](https://js.langchain.com) | `^0.3.26` | AgentExecutor + DynamicStructuredTool |
+| LLM providers | OpenAI / Anthropic / Ollama | `^4.100.0` / `^0.51.0` / `^0.2.1` | Swap via `LLM_PROVIDER` env |
+| Tool protocol | [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/sdk) | `^1.29.0` | stdio + SSE + streamable-http |
+| Messaging | [`@2060.io/vs-agent-nestjs-client`](https://github.com/2060-io/vs-agent) | `1.5.5` | DIDComm v2 + VC auth + menus |
+| Credentials | [`@credo-ts/core`](https://github.com/openwallet-foundation/credo-ts) | `^0.5.18` | Verifiable credential verification |
+| RAG | Pinecone / Redis vector store | `^6.0.0` / `^0.1.0` | Optional; off by default |
+| Database | PostgreSQL | `16-alpine` | via [TypeORM](https://typeorm.io) `^0.3.24` |
+| Memory / cache | Redis | `7.4.0` | Shared memory backend for workspaces |
+| Reverse proxy | Traefik | `v3.6` | Path-based routing for multi-bot deploys |
+| Crypto at rest | AES-256-GCM | Node.js `crypto` (built-in) | BYOMCP headers + per-user MCP credentials |
+| Validation | [Zod](https://zod.dev) | `^3.25.51` | `agent-pack.yaml` schema |
+| Tests | Jest + `@nestjs/testing` | `^29.7.0` / `^11.0.1` | 75 tests, 7 suites, ~40s |
 
-```
-HOLOCLAW_MULTI_TENANT=true
-HOLOCLAW_MAX_WORKSPACES_PER_OWNER=10
-HOLOCLAW_INVITE_TTL_HOURS=168
-HOLOCLAW_INVITE_DEFAULT_ROLE=collaborator
-HOLOCLAW_LIVE_FEED_ENABLED=true
-HOLOCLAW_LIVE_FEED_VERBOSITY=verbose
-HOLOCLAW_SPEAKER_TAGS_ENABLED=true
-```
+---
 
-## 🏠 Self-hosting
+## 🧪 Testing
 
-Ready to deploy under the hologram-demos-home monorepo as the `/holoclaw` path:
-- `deploy/home-server/docker-compose.yml` has a `holoclaw-vsa` + `holoclaw-bot` service pair
-- `deploy/home-server/bots/holoclaw/.env.example` documents the required keys
-- `deploy/home-server/landing/holoclaw/index.html` is the public landing page
-- Routes: `GET /holoclaw` → landing, `/holoclaw/qr` → QR PNG, `/holoclaw/invitation` → JSON invite, `/holoclaw/dm/*` → DIDComm
+HoloClaw ships with a deep test suite. Every new service has unit coverage with proper repository mocks, and the `CoreService` workspace flows have end-to-end integration tests that exercise the full state machine with real service instances (only the DB and VS Agent client mocked).
 
-## 🧪 Running the test suite
+| Suite | Tests | Coverage |
+|---|---:|---|
+| [`workspace.service.spec.ts`](./src/workspace/workspace.service.spec.ts) | 17 | create, findById, listForIdentity, isOwner, `maxPerOwner`, duplicates, trimming, empty/long names |
+| [`invite.service.spec.ts`](./src/workspace/invite.service.spec.ts) | 12 | single/multi-use, revoke, expiry, unknown/empty token, role validation, unique generation |
+| [`workspace-member.service.spec.ts`](./src/workspace/workspace-member.service.spec.ts) | 9 | add, conflict, reconnect, `rolesFor`, `findByConnection`, `attachConnection` |
+| [`workspace-mcp.service.spec.ts`](./src/workspace/workspace-mcp.service.spec.ts) | 12 | slug generation, happy-path add, encrypted round-trip, duplicate rejection, cross-workspace isolation, rollback on connect failure, restoration on module init |
+| [`broadcast.service.spec.ts`](./src/broadcast/broadcast.service.spec.ts) | 15 | fan-out, exclude, concurrent failures, every verbosity level, enable/disable toggles, direct-list delivery |
+| [`live-feed-callback.handler.spec.ts`](./src/broadcast/live-feed-callback.handler.spec.ts) | 8 | `mcp_*` name parsing, start→end duration, error propagation, state cleanup, debug arg JSON parsing |
+| [`core.service.holoclaw.spec.ts`](./src/core/core.service.holoclaw.spec.ts) | 7 | `newConnection` → `LOBBY`, create flow end-to-end, join flow with broadcast + exclude-self, invalid token, **observer guard never calls LLM**, leave flow preserves membership |
+| **Total** | **75** | **7 suites, ~40s wall-time** |
 
 ```bash
 pnpm install
 pnpm exec jest src/workspace src/broadcast src/core/core.service.holoclaw
-# 75 tests, ~40 seconds
+# Test Suites: 7 passed, 7 total
+# Tests:       75 passed, 75 total
 ```
 
 ---
 
-## 🤖 Upstream: hologram-generic-ai-agent-vs
+## 🚀 Self-hosting in 5 minutes
 
-The sections below document the upstream generic agent (LLM, MCP, RAG, RBAC, approval, per-user credentials, i18n). HoloClaw inherits all of it.
+### Option 1 — Home-server monorepo (recommended)
 
----
-
-## 🚀 Overview
-
-- **Personalized AI welcome** — sends a greeting message when a user connects via Hologram
-- **Multi-LLM support** — OpenAI, Ollama, Anthropic + any OpenAI-compatible API (Kimi, DeepSeek, Groq, Together AI, etc.)
-- **RAG** — Retrieval Augmented Generation with Pinecone or Redis vector stores
-- **MCP integration** — connect to remote MCP servers (e.g. GitHub Copilot MCP) and expose their tools to the LLM agent
-- **Per-user MCP credentials** — users configure their own tokens via an in-chat flow; stored with AES-256-GCM encryption
-- **Lazy tool discovery** — MCP servers that require user tokens connect on-demand, not at startup
-- **Verifiable credential authentication** — DIDComm-based auth with contextual menus
-- **Role-based access control (RBAC)** — per-role tool access driven by verified credential claims
-- **Approval workflow** — tools can require managerial approval before execution, with notifications and contextual menu badges
-- **Session memory** — in-memory or Redis-backed conversation context
-- **Multi-language** — English, Spanish, French, Portuguese out-of-the-box
-- **Agent Packs** — all configuration in one `agent-pack.yaml` manifest with `${ENV_VAR}` placeholders
-- **Helm chart** — production-ready Kubernetes deployment
-
----
-
-## 🗂️ Project Structure
-
-```text
-src/
-  ├── core/           # CoreService (message routing, state machine, menus, auth, MCP config flow)
-  ├── chatbot/        # Chatbot service, prompt logic, session handling
-  ├── llm/            # LLM provider adapters (OpenAI, Ollama, Anthropic) + LangChain agent
-  ├── mcp/            # MCP client (connections, lazy discovery, per-user config, tool cache)
-  ├── rag/            # RAG services (vector store, document ingestion, context retrieval)
-  ├── memory/         # Memory service (in-memory / Redis backends)
-  ├── rbac/           # RBAC service, approval workflow, tool-call interceptor
-  ├── config/         # Agent-pack loader + Zod schema validation
-  ├── integrations/   # VS Agent, stats, PostgreSQL integrations
-  ├── common/         # Utilities, language detection
-  └── main.ts         # Application bootstrap
-
-scripts/
-  ├── common.sh       # Shared shell helpers (logging, network config, credential helpers)
-  ├── setup.sh        # Full local setup: VS Agent + ngrok + veranad + credentials
-  └── start.sh        # Start chatbot in dev mode (hot-reload)
-
-docker/
-  └── docker-compose.yml   # Infrastructure services (VS Agent, Redis, PostgreSQL)
-
-agent-packs/
-  ├── hologram-welcome/    # Default welcome agent pack
-  └── github-agent/        # GitHub MCP agent pack (example)
-
-charts/                    # Helm chart for Kubernetes deployment
-```
-
----
-
-## 💻 Local Development Setup
-
-### Prerequisites
-
-- **Node.js 22+** and **pnpm** (corepack)
-- **Docker** (for infrastructure services)
-- **ngrok** (authenticated, for VS Agent public URL tunneling)
-
-### Step 1: Clone and install
+HoloClaw lives inside [`AirKyzzZ/hologram-demos-home`](https://github.com/AirKyzzZ/hologram-demos-home) — a Docker Compose + Traefik + Tailscale Funnel stack designed for a single NUC under your desk. This is what's running the public demo.
 
 ```bash
-git clone git@github.com:2060-io/hologram-generic-ai-agent-vs.git
-cd hologram-generic-ai-agent-vs
-corepack enable
+ssh your-server
+git clone https://github.com/AirKyzzZ/hologram-demos-home ~/holo-stack
+cd ~/holo-stack/deploy/home-server
+./setup.sh                                       # clones all bot sources + configures Tailscale Funnel
+
+cp .env.example .env
+$EDITOR .env                                     # set POSTGRES_PASSWORD, HOLOCLAW_AGENT_WALLET_KEY, PUBLIC_BASE_URL
+
+cp bots/holoclaw/.env.example bots/holoclaw/.env
+$EDITOR bots/holoclaw/.env                       # set OPENAI_API_KEY + MCP_CONFIG_ENCRYPTION_KEY
+
+make up
+make logs                                        # watch it come up
+```
+
+Your bot is now live at `https://<your-tailnet>.ts.net/holoclaw`. Scan the QR from the Hologram app and you're in.
+
+The auto-update systemd timer pulls this repo + the holoclaw source every 15 minutes and rebuilds the image if HEAD changed — zero-effort CD.
+
+### Option 2 — Standalone `docker-compose`
+
+If you don't want the full multi-bot stack, you can run HoloClaw alone. Copy the `holoclaw-vsa` + `holoclaw-bot` service blocks from [`hologram-demos-home/deploy/home-server/docker-compose.yml`](https://github.com/AirKyzzZ/hologram-demos-home/blob/main/deploy/home-server/docker-compose.yml) plus the shared `postgres` + `redis` services, and you're good.
+
+### Option 3 — Local dev
+
+```bash
+git clone https://github.com/AirKyzzZ/hologram-holoclaw-bot-vs
+cd hologram-holoclaw-bot-vs
 pnpm install
+cp config.env .env
+$EDITOR .env                                     # at minimum: OPENAI_API_KEY, MCP_CONFIG_ENCRYPTION_KEY
+pnpm run start:dev
 ```
 
-### Step 2: Create `.env`
+You'll need a running vs-agent sidecar for DIDComm — see the [upstream README](https://github.com/2060-io/hologram-generic-ai-agent-vs) for the docker-compose dev stack.
 
-Copy and adapt the example below:
+### Required secrets
 
-```env
-# App
-APP_PORT=3010
-LOG_LEVEL=3
-
-# LLM
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-proj-xxx
-OPENAI_MODEL=gpt-4o-mini
-
-# Agent Pack (choose one)
-AGENT_PACK_PATH=./agent-packs/github-agent
-# AGENT_PACK_PATH=./agent-packs/hologram-welcome
-
-# Infrastructure
-REDIS_URL=redis://localhost:6379
-POSTGRES_HOST=localhost
-POSTGRES_USER=hologram
-POSTGRES_PASSWORD=hologram
-POSTGRES_DB_NAME=hologram-agent
-
-# RAG
-VECTOR_STORE=redis
-RAG_PROVIDER=langchain
-RAG_DOCS_PATH=./docs
-
-# Memory
-AGENT_MEMORY_BACKEND=memory
-AGENT_MEMORY_WINDOW=8
-
-# VS Agent ports (used by docker-compose and scripts)
-VS_AGENT_ADMIN_PORT=3002
-VS_AGENT_PUBLIC_PORT=3003
-
-# Auth (optional — omit to hide the Authenticate menu)
-# CREDENTIAL_DEFINITION_ID=did:webvh:...
-
-# MCP — GitHub remote MCP server (optional)
-GITHUB_MCP_URL=https://api.githubcopilot.com/mcp/
-# GITHUB_PERSONAL_ACCESS_TOKEN=github_pat_xxx   # optional admin token
-MCP_CONFIG_ENCRYPTION_KEY=<64-char-hex-string>   # required for per-user MCP config
-
-# Stats (disable for local dev)
-VS_AGENT_STATS_ENABLED=false
-```
-
-Generate an encryption key with:
-
-```bash
-openssl rand -hex 32
-```
-
-### Step 3: Start infrastructure services
-
-```bash
-docker compose -f docker/docker-compose.yml up -d
-```
-
-This starts:
-- **Redis** on port 6379 (vector store + memory)
-- **PostgreSQL** on port 5432 (sessions, MCP user config)
-- **VS Agent** on ports 3002 (admin) / 3003 (public)
-
-### Step 4: Run the full setup (optional, for VS Agent + credentials)
-
-If you need the VS Agent with DIDComm, ngrok tunneling, and verifiable credentials:
-
-```bash
-./scripts/setup.sh
-```
-
-This script:
-1. Pulls and starts the VS Agent Docker container with an ngrok tunnel
-2. Sets up a `veranad` CLI account on testnet (or devnet)
-3. Obtains a Service credential from an organization-vs instance
-4. Optionally creates an AnonCreds credential definition for authentication
-
-Output is saved to `ids.env`.
-
-### Step 5: Start the chatbot
-
-```bash
-./scripts/start.sh
-```
-
-Or directly:
-
-```bash
-pnpm start:dev
-```
-
-The chatbot runs on `http://localhost:3010` with hot-reload enabled.
+| Variable | How to generate | Why |
+|---|---|---|
+| `OPENAI_API_KEY` | Your OpenAI account | LLM backend (or Anthropic / Ollama — see `LLM_PROVIDER`) |
+| `MCP_CONFIG_ENCRYPTION_KEY` | `openssl rand -hex 32` | **Required for BYOMCP.** Encrypts workspace MCP server headers at rest. If this rotates, every stored BYOMCP server must be re-added. |
+| `HOLOCLAW_AGENT_WALLET_KEY` | `openssl rand -base64 32` | Credo wallet encryption key for the vs-agent sidecar. **Never change** once the bot is running or every previously issued invitation is invalidated. |
 
 ---
 
-## 📦 Agent Packs
+## ⚙️ Configuration
 
-All agent configuration lives in a single `agent-pack.yaml` manifest. Set `AGENT_PACK_PATH` to point to the directory containing the manifest.
-
-Two example packs are included:
-
-- **`agent-packs/hologram-welcome/`** — default Hologram welcome agent
-- **`agent-packs/github-agent/`** — GitHub MCP-enabled agent with per-user token configuration
-
-Full schema reference: [`docs/agent-pack-schema.md`](./docs/agent-pack-schema.md)
-
-### Key sections
-
-| Section      | Description |
-|-------------|-------------|
-| `metadata`  | Agent ID, display name, description, tags |
-| `languages` | Per-language greeting messages, system prompts, and i18n strings |
-| `llm`       | Provider, model, temperature, agent prompt |
-| `rag`       | RAG provider, docs path, vector store config |
-| `memory`    | Backend (memory/redis), window size |
-| `flows`     | Welcome flow, authentication flow, contextual menu items |
-| `tools`     | Dynamic HTTP tools, bundled tools (statistics) |
-| `mcp`       | MCP server definitions (see below) |
-| `integrations` | VS Agent, PostgreSQL, stats |
-
----
-
-## 🔌 MCP (Model Context Protocol) Integration
-
-The agent can connect to remote MCP servers and expose their tools to the LLM. MCP servers are declared in the `mcp.servers` section of the agent pack.
-
-### Example: GitHub MCP server
+All HoloClaw behaviour is declarative in [`agent-packs/holoclaw/agent-pack.yaml`](./agent-packs/holoclaw/agent-pack.yaml). Every knob is also exposed as an environment variable override.
 
 ```yaml
-mcp:
-  servers:
-    - name: github
-      transport: streamable-http
-      url: ${GITHUB_MCP_URL}
-      headers:
-        Authorization: "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
-      accessMode: user-controlled
-      userConfig:
-        fields:
-          - name: token
-            type: secret
-            label:
-              en: "Please enter your GitHub Personal Access Token:"
-              es: "Por favor, ingresa tu Token de Acceso Personal de GitHub:"
-              fr: "Veuillez entrer votre jeton d'accès personnel GitHub :"
-            headerTemplate: "Bearer {value}"
-      toolAccess:
-        default: admin
-        public:
-          - search_repositories
-          - search_code
-          - search_issues
-          - list_pull_requests
-          - get_file_contents
-          - get_me
+holoclaw:
+  workspaces:
+    multiTenant: true           # one deployment, many workspaces
+    maxPerOwner: 10             # rate-limit workspace creation per identity
+    nameMaxLength: 120
+  invites:
+    tokenTTLHours: 168          # 7 days
+    defaultRole: collaborator
+    allowedRoles: [collaborator, observer, approver]
+  llmBudget:
+    perWorkspaceTurnLimitPerHour: 60   # cost guardrail for shared-key MVP
+    rejectOnExceed: true
+  liveFeed:
+    enabled: true
+    verbosity: verbose           # minimal | verbose | debug
+    broadcastToolErrors: true
+  speakerTags:
+    enabled: true
+    format: '[{identity}:{role}]: '   # {identity} and {role} are substituted
+  audit:
+    retentionDays: 90
 ```
 
-### Access modes
-
-- **`admin-controlled`** — the server token comes from an environment variable. All users share the same connection.
-- **`user-controlled`** — each user provides their own token via an in-chat configuration flow. Tokens are encrypted with AES-256-GCM and stored in PostgreSQL.
-
-### Tool access control
-
-Two models are supported:
-
-**Legacy (binary) model:**
-
-- **`default: admin`** — only admin users see all tools; non-admin users see only tools listed in `public`
-- **`default: public`** — all tools are available to all users
-
-**RBAC (role-based) model:**
-
-When `toolAccess.roles` is defined, role-based access control is active. Each role maps to a list of tools:
-
-```yaml
-toolAccess:
-  default: none
-  roles:
-    guest: [get_exchange_rate]
-    employee: [list_profiles, get_balances]
-    finance: [send_money, create_invoice]
-  approval:
-    - tools: [send_money]
-      approvers: [finance-manager, cfo]
-      timeoutMinutes: 60
-```
-
-- Tools are **filtered per user** — the LLM only sees tools the user's roles grant access to
-- Tools with an `approval` policy require managerial approval before execution
-- Users who hold both the tool role and an approver role get **self-approval** (immediate execution)
-- Admin users (listed in `flows.authentication.adminUsers`) bypass all RBAC checks
-
-See [RBAC & Approval Workflow](#-rbac--approval-workflow) for details.
-
-### Per-user MCP configuration flow
-
-When a user clicks "MCP Server Config" in the contextual menu:
-
-1. A list of user-controlled servers is shown (✅ = configured, ⚠️ = not yet configured)
-2. The user selects a server and is prompted for each required field (e.g. token)
-3. Credentials are encrypted and stored in PostgreSQL
-4. The agent tests the connection immediately — ✅ success or ⚠️ invalid credentials
-5. On success, the MCP tools become available to the user's LLM agent
-6. On failure, the stored config is deleted so the user can retry
-
-### Lazy tool discovery
-
-If no admin token is configured for a user-controlled server, the shared connection is skipped at startup. Tool definitions are discovered on the first successful per-user connection and cached. The LLM agent is rebuilt dynamically when new tools appear.
-
-### Environment variables for MCP
-
-| Variable | Description |
-|----------|-------------|
-| `GITHUB_MCP_URL` | URL of the GitHub MCP server |
-| `GITHUB_PERSONAL_ACCESS_TOKEN` | (Optional) Admin token for shared connection |
-| `MCP_CONFIG_ENCRYPTION_KEY` | 32-byte hex key for encrypting per-user MCP credentials |
+Every value above can be overridden at runtime via env vars prefixed with `HOLOCLAW_` (see [`src/config/app.config.ts`](./src/config/app.config.ts)).
 
 ---
 
-## � RBAC & Approval Workflow
+## 🗺 Roadmap
 
-When `toolAccess.roles` is configured on any MCP server, the agent activates role-based access control. User roles are extracted from verified credential attributes after authentication.
-
-### How it works
-
-1. **Authentication** — user presents a verifiable credential (DIDComm identity proof)
-2. **Role resolution** — the agent extracts roles from the credential attribute named in `rolesAttribute` (supports single string, comma-separated list, or JSON array). Falls back to `defaultRole` if absent.
-3. **Tool filtering** — the LLM agent is built with only the tools the user's roles can access (ALLOW + APPROVAL). Denied tools are not exposed to the LLM at all.
-4. **Tool execution** — when the LLM calls a tool:
-   - **ALLOW** → executes immediately
-   - **DENY** → returns "tool not available for your role"
-   - **APPROVAL** → if the user holds an approver role, self-approves; otherwise queues a request
-5. **Approval flow** — pending requests notify approvers via message + contextual menu badge. Approvers approve/reject from the menu. Results are delivered as messages.
-
-### Configuration
-
-```yaml
-flows:
-  authentication:
-    required: true
-    credentialDefinitionId: did:webvh:...:corp-badge
-    userIdentityAttribute: employeeLogin
-    rolesAttribute: roles
-    defaultRole: employee
-    adminUsers: [alice@acme.corp]
-  menu:
-    items:
-      - id: authenticate
-        labelKey: CREDENTIAL
-        action: authenticate
-        visibleWhen: unauthenticated
-      - id: logout
-        labelKey: LOGOUT
-        action: logout
-        visibleWhen: authenticated
-      - id: my-approval-requests
-        labelKey: MY_APPROVAL_REQUESTS
-        action: my-approval-requests
-        visibleWhen: hasApprovalRequests
-        badge: approvalRequestCount
-      - id: pending-approvals
-        labelKey: PENDING_APPROVALS
-        action: pending-approvals
-        visibleWhen: hasPendingApprovals
-        badge: pendingApprovalCount
-
-mcp:
-  servers:
-    - name: wise
-      transport: streamable-http
-      url: ${WISE_MCP_URL}
-      accessMode: admin-controlled
-      headers:
-        Authorization: "Bearer ${WISE_API_TOKEN}"
-      toolAccess:
-        default: none
-        roles:
-          guest: [get_exchange_rate]
-          employee: [list_profiles, get_balances, list_transfers]
-          finance: [send_money, create_invoice]
-        approval:
-          - tools: [send_money]
-            approvers: [finance-manager, cfo]
-            timeoutMinutes: 60
-```
-
-### Verifying tool access
-
-Users can ask the agent *"What tools can I use?"* and the LLM will list all available tools grouped by MCP server, based on the user's current role. This provides direct evidence that RBAC filtering is working correctly.
-
-### i18n keys for approval workflow
-
-Add these to `languages.<lang>.strings` in the agent pack:
-
-| Key | Description |
-|-----|-------------|
-| `MY_APPROVAL_REQUESTS` | Label for the "my approval requests" menu item |
-| `PENDING_APPROVALS` | Label for the "pending approvals" menu item |
-
-Defaults are provided in English, Spanish, and French.
-
-Full design specification: [`docs/rbac-approval-spec.md`](./docs/rbac-approval-spec.md)
+| Version | Feature | Status |
+|---|---|---|
+| **V1.5** | Template workspaces (research / code / devops / content presets) | Planned — just new `agent-pack.yaml` files |
+| **V1.5** | Tool execution audit viewer (queryable by workspace) | Planned — rows are already persisted |
+| **V2** | **BYOK** — per-workspace LLM API keys | Table + migration shipped; service wiring deferred |
+| **V2** | `WorkspaceMemberCredential` VC issuance for persistent rejoin | Spec'd in ADR-01 |
+| **V2** | Media / file processing (PDFs, images, code attachments) | `MediaMessage` already received by the base agent |
+| **V2** | Role-scoped memory digests (observers see summaries, collaborators see full stream) | Spec'd in ADR-03 |
+| **V2** | Async task mode with BullMQ (agent works while everyone is offline) | Out of scope for MVP |
 
 ---
 
-## �� Environment Variables
+## 🤝 Credits
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `APP_PORT` | Application port | `3000` |
-| `LOG_LEVEL` | Log level (1=error, 2=warn, 3=info, 4=debug) | `3` |
-| `AGENT_PACK_PATH` | Path to agent pack directory | `./agent-packs/hologram-welcome` |
-| `LLM_PROVIDER` | LLM backend: `openai`, `ollama`, `anthropic` | `ollama` |
-| `OPENAI_API_KEY` | OpenAI API key | |
-| `OPENAI_MODEL` | OpenAI model | `gpt-4o-mini` |
-| `OPENAI_TEMPERATURE` | Temperature (0–1) | `0.3` |
-| `OPENAI_MAX_TOKENS` | Max tokens per completion | `512` |
-| `OPENAI_BASE_URL` | Base URL for OpenAI-compatible APIs (Kimi, DeepSeek, Groq, etc.) | |
-| `OLLAMA_ENDPOINT` | Ollama endpoint | `http://ollama:11434` |
-| `OLLAMA_MODEL` | Ollama model | `llama3` |
-| `ANTHROPIC_API_KEY` | Anthropic API key | |
-| `RAG_PROVIDER` | RAG backend: `vectorstore` or `langchain` | `vectorstore` |
-| `RAG_DOCS_PATH` | RAG documents directory | `/app/rag/docs` |
-| `RAG_CHUNK_SIZE` | Max chars per chunk | `1000` |
-| `RAG_CHUNK_OVERLAP` | Overlap between chunks | `200` |
-| `RAG_REMOTE_URLS` | Remote document URLs (CSV or JSON array) | |
-| `VECTOR_STORE` | Vector store: `pinecone` or `redis` | `redis` |
-| `VECTOR_INDEX_NAME` | Vector index name | `hologram-ia` |
-| `PINECONE_API_KEY` | Pinecone API key | |
-| `REDIS_URL` | Redis connection URL | `redis://localhost:6379` |
-| `AGENT_MEMORY_BACKEND` | Memory backend: `memory` or `redis` | `redis` |
-| `AGENT_MEMORY_WINDOW` | Chat memory window size | `8` |
-| `POSTGRES_HOST` | PostgreSQL host | `postgres` |
-| `POSTGRES_USER` | PostgreSQL user | `2060demo` |
-| `POSTGRES_PASSWORD` | PostgreSQL password | `2060demo` |
-| `POSTGRES_DB_NAME` | PostgreSQL database name | `test-service-agent` |
-| `CREDENTIAL_DEFINITION_ID` | VC definition ID (omit to hide auth menu) | |
-| `AUTH_REQUIRED` | Require authentication before chat (blocks guests) | `false` |
-| `USER_IDENTITY_ATTRIBUTE` | Credential attribute for user identity | `name` |
-| `ROLES_ATTRIBUTE` | Credential attribute containing user roles | |
-| `DEFAULT_ROLE` | Fallback role when credential lacks roles | `user` |
-| `ADMIN_USERS` | Comma-separated list of admin user identities | |
-| `ADMIN_AVATARS` | (Legacy) Comma-separated admin avatar names | |
-| `VS_AGENT_ADMIN_URL` | VS Agent admin API URL | |
-| `LLM_TOOLS_CONFIG` | External HTTP tools (JSON array) | `[]` |
-| `STATISTICS_API_URL` | Statistics API URL | |
-| `STATISTICS_REQUIRE_AUTH` | Require auth for statistics | `false` |
-| `MCP_CONFIG_ENCRYPTION_KEY` | AES-256-GCM key for per-user MCP config (64 hex chars) | |
+- Forked from [**`2060-io/hologram-generic-ai-agent-vs`**](https://github.com/2060-io/hologram-generic-ai-agent-vs) — inherits LLM, MCP, RAG, memory, RBAC, and the approval workflow. HoloClaw only adds the workspace overlay on top.
+- Built on [**`@2060.io/vs-agent-nestjs-client`**](https://github.com/2060-io/vs-agent) `1.5.5` — the NestJS DIDComm client that makes Hologram bots possible.
+- Runs inside the [**Hologram**](https://hologram.zone) mobile messaging platform — the DIDComm wallet that scans the QR codes.
+- Trust registry powered by [**Verana**](https://github.com/verana-labs).
+- Deployed as part of [**`AirKyzzZ/hologram-demos-home`**](https://github.com/AirKyzzZ/hologram-demos-home) — a personal lab for running verifiable-service agents on a home server behind Tailscale Funnel.
+- Architecture spec, data model, and all six ADRs live in [`docs/HOLOCLAW_ARCHITECTURE.md`](./docs/HOLOCLAW_ARCHITECTURE.md). Read it if you want the why, not just the what.
 
 ---
 
-## 📝 Bot Conversation Flow
+## 📄 License
 
-The `CoreService` manages the conversation state machine with four states:
-
-- **`START`** — initial state, sends welcome message
-- **`AUTH`** — waiting for credential presentation
-- **`CHAT`** — normal conversation with LLM
-- **`MCP_CONFIG`** — collecting MCP server credentials from the user
-
-Contextual menu items adapt dynamically based on authentication status, MCP configuration state, and the agent pack configuration.
-
-![Hologram IA Agent flow](./docs/assets/hologram-ia-flow.png)
+`UNLICENSED` — private during development, following the upstream convention. The base code lineage remains under the upstream [`2060-io/hologram-generic-ai-agent-vs`](https://github.com/2060-io/hologram-generic-ai-agent-vs) license.
 
 ---
 
-## 🐳 Docker Compose (infrastructure only)
-
-For local development, infrastructure services run in Docker while the chatbot runs natively with hot-reload:
-
-```bash
-docker compose -f docker/docker-compose.yml up -d
-```
-
-Services started:
-- **VS Agent** — DIDComm agent (ports 3002/3003)
-- **Redis** — vector store + memory backend (port 6379)
-- **PostgreSQL** — sessions + MCP user config (port 5432)
-
-The chatbot itself runs via `pnpm start:dev` or `./scripts/start.sh`.
-
----
-
-## 📚 Additional Documentation
-
-- [Agent Pack Schema](./docs/agent-pack-schema.md) — full manifest reference
-- [RBAC & Approval Spec](./docs/rbac-approval-spec.md) — role-based access control and approval workflow design
-- [RAG Service](./docs/how-to-use-rag-service.md) — vector store and RAG provider setup
-- [Memory Module](./docs/how-to-use-memory-service.md) — in-memory and Redis backends
-- [Ollama Setup](./docs/how-to-use-ollama.md) — local LLM with Ollama + Llama3
-- [JMS Integration](./docs/hologram-generic-jms-integration.md) — statistics module with Artemis
-
-## 🛠️ HTTP Tools (LLM_TOOLS_CONFIG)
-
-External HTTP APIs can be exposed as LangChain tools via the `LLM_TOOLS_CONFIG` environment variable or the `tools.dynamicConfig` agent-pack field.
-
-```json
-[
-  {
-    "name": "getLocation",
-    "description": "Query location by US zipcode.",
-    "endpoint": "https://api.zippopotam.us/us/{query}",
-    "method": "GET",
-    "requiresAuth": false
-  }
-]
-```
-
-- **`requiresAuth: true`** — tool requires the user to be authenticated first
-- **`authHeader` / `authToken`** — optional HTTP auth for the external API
-
-> HTTP tools are available with OpenAI and Anthropic providers only.
+<p align="center">
+Made with 🪝 in Bordeaux by <a href="https://maximemansiet.fr">Maxime Mansiet</a><br>
+<sub>DIDComm is point-to-point by design, so multiplayer happens in the fan-out layer. That's the architectural heart of HoloClaw.</sub>
+</p>
