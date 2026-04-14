@@ -48,7 +48,14 @@ import { BroadcastModule } from './broadcast/broadcast.module'
         },
         eventHandler: CoreService,
         url: process.env.VS_AGENT_ADMIN_URL,
-        imports: [ChatbotModule, MemoryModule],
+        // HoloClaw: EventsModule creates its own sub-module scope to host
+        // the eventHandler (CoreService). Any service CoreService injects
+        // must be reachable from that sub-module — merely importing the
+        // modules at the app root isn't enough. Wire the workspace +
+        // broadcast modules here so CoreService can resolve
+        // WorkspaceService / WorkspaceMemberService / InviteService /
+        // WorkspaceMcpService / BroadcastService at instantiation time.
+        imports: [ChatbotModule, MemoryModule, WorkspaceModule, BroadcastModule],
       },
     }),
   ],
