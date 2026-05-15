@@ -70,6 +70,9 @@ flows:
     enabled: false
     required: false
     credentialDefinitionId: ${CREDENTIAL_DEFINITION_ID}
+    # When set, a user who submits an incompatible/missing credential is sent
+    # an invitation to this issuer service instead of a bare error.
+    issuerServiceDid: ${ISSUER_SERVICE_DID}
     userIdentityAttribute: ${USER_IDENTITY_ATTRIBUTE}
     rolesAttribute: ${ROLES_ATTRIBUTE}
     defaultRole: collaborator

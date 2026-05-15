@@ -53,6 +53,8 @@ export const DEFAULT_TRANSLATIONS: Record<string, Record<string, string>> = {
     AUTH_PROCESS_STARTED: 'Authentication process has started. Please respond to the credential request.',
     STATS_ERROR: 'Sorry, we could not retrieve your statistics at the moment.',
     ERROR_MESSAGES: 'The service is not available at the moment. Please try again later.',
+    AUTH_NO_CREDENTIAL:
+      "You don't have the required credential yet. Here is an invitation to the service that can issue it:",
     VOICE_AUTH_REQUIRED: 'Voice messages require authentication. Please authenticate first to use this feature.',
     VOICE_TRANSCRIPTION_EMPTY:
       "I couldn't make out anything in that voice note. Could you try again or type your message?",
@@ -84,6 +86,8 @@ export const DEFAULT_TRANSLATIONS: Record<string, Record<string, string>> = {
     AUTH_PROCESS_STARTED: 'El proceso de autenticación ha comenzado. Por favor, responde a la solicitud de credencial.',
     STATS_ERROR: 'Lo sentimos, no pudimos obtener tus estadísticas en este momento.',
     ERROR_MESSAGES: 'El servicio no está disponible en este momento. Por favor, intenta de nuevo más tarde.',
+    AUTH_NO_CREDENTIAL:
+      'Aún no tienes la credencial requerida. Aquí tienes una invitación al servicio que puede emitirla:',
     VOICE_AUTH_REQUIRED:
       'Los mensajes de voz requieren autenticación. Por favor, autentícate primero para usar esta función.',
     VOICE_TRANSCRIPTION_EMPTY:
@@ -157,6 +161,8 @@ export const DEFAULT_TRANSLATIONS: Record<string, Record<string, string>> = {
     AUTH_PROCESS_STARTED: "Le processus d'authentification a commencé. Veuillez répondre à la demande de justificatif.",
     STATS_ERROR: "Désolé, nous n'avons pas pu récupérer vos statistiques pour le moment.",
     ERROR_MESSAGES: "Le service n'est pas disponible pour le moment. Veuillez réessayer plus tard.",
+    AUTH_NO_CREDENTIAL:
+      "Vous n'avez pas encore le justificatif requis. Voici une invitation au service qui peut vous le délivrer :",
     VOICE_AUTH_REQUIRED:
       "Les messages vocaux nécessitent une authentification. Veuillez vous authentifier d'abord pour utiliser cette fonctionnalité.",
     VOICE_TRANSCRIPTION_EMPTY:

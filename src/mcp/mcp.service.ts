@@ -42,6 +42,9 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
   /** Per-user MCP connections keyed by "avatarName:serverName" */
   private readonly userConnections = new Map<string, McpConnection>()
 
+  /** Coalesces concurrent shared reconnect attempts per server name */
+  private readonly inFlightReconnects = new Map<string, Promise<boolean>>()
+
   /** Maps server name → accessMode */
   private readonly accessModeMap = new Map<string, string>()
 
@@ -76,7 +79,9 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
 
       // Skip shared connection for user-controlled servers without valid admin headers
       if (def.accessMode === 'user-controlled' && this.hasUnresolvedHeaders(def)) {
-        this.logger.log(`Skipping shared connection for user-controlled server "${def.name}" (no admin token). Tools will be discovered on first user connection.`)
+        this.logger.log(
+          `Skipping shared connection for user-controlled server "${def.name}" (no admin token). Tools will be discovered on first user connection.`,
+        )
         continue
       }
 
@@ -87,7 +92,9 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    this.logger.log(`MCP initialization complete. ${this.connections.length}/${this.serverDefs.length} server(s) connected.`)
+    this.logger.log(
+      `MCP initialization complete. ${this.connections.length}/${this.serverDefs.length} server(s) connected.`,
+    )
   }
 
   async onModuleDestroy() {
@@ -202,28 +209,58 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
     const allTools: McpToolInfo[] = []
     const discoveredServers = new Set<string>()
 
-    // Tools from shared (admin) connections
-    for (const conn of this.connections) {
+    // Consider all shared server defs (admin-controlled, or user-controlled with a shared admin connection).
+    // For each, try to use the live connection; if absent or errored, attempt a single reconnect.
+    for (const def of this.serverDefs) {
+      if (def.accessMode === 'user-controlled' && this.hasUnresolvedHeaders(def)) continue
+
+      let conn = this.connections.find((c) => c.name === def.name)
+      if (!conn) {
+        const ok = await this.reconnectShared(def.name)
+        if (!ok) continue
+        conn = this.connections.find((c) => c.name === def.name)
+        if (!conn) continue
+      }
+
       discoveredServers.add(conn.name)
       const access = this.toolAccessMap.get(conn.name)
-      try {
-        let cursor: string | undefined
-        do {
-          const result = await conn.client.listTools({ cursor })
-          for (const tool of result.tools) {
-            const pub = this.isToolPublic(tool.name, access)
-            allTools.push({
-              serverName: conn.name,
-              name: tool.name,
-              description: tool.description ?? '',
-              inputSchema: (tool.inputSchema as Record<string, unknown>) ?? {},
-              isPublic: pub,
-            })
-          }
-          cursor = result.nextCursor
-        } while (cursor)
-      } catch (err) {
-        this.logger.error(`Error listing tools from MCP server "${conn.name}": ${err}`)
+
+      const fetchOnce = async (c: McpConnection): Promise<McpToolInfo[] | 'retry'> => {
+        const collected: McpToolInfo[] = []
+        try {
+          let cursor: string | undefined
+          do {
+            const result = await c.client.listTools({ cursor })
+            for (const tool of result.tools) {
+              collected.push({
+                serverName: c.name,
+                name: tool.name,
+                description: tool.description ?? '',
+                inputSchema: (tool.inputSchema as Record<string, unknown>) ?? {},
+                isPublic: this.isToolPublic(tool.name, access),
+              })
+            }
+            cursor = result.nextCursor
+          } while (cursor)
+          return collected
+        } catch (err) {
+          this.logger.warn(`Error listing tools from MCP server "${c.name}": ${err}. Attempting reconnect...`)
+          return 'retry'
+        }
+      }
+
+      let tools = await fetchOnce(conn)
+      if (tools === 'retry') {
+        const ok = await this.reconnectShared(conn.name)
+        if (ok) {
+          const newConn = this.connections.find((c) => c.name === def.name)
+          if (newConn) tools = await fetchOnce(newConn)
+        }
+      }
+      if (tools !== 'retry') {
+        allTools.push(...tools)
+      } else {
+        this.logger.error(`Giving up on listTools for "${def.name}" after reconnect attempt.`)
       }
     }
 
@@ -244,20 +281,30 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
    *
    * @param isAdmin - Whether the caller has admin privileges.
    */
-  async callTool(serverName: string, toolName: string, args: Record<string, unknown>, isAdmin = false): Promise<string> {
-    const sharedConn = this.connections.find((c) => c.name === serverName) ?? null
+  async callTool(
+    serverName: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    isAdmin = false,
+  ): Promise<string> {
     const accessMode = this.accessModeMap.get(serverName)
+    let sharedConn = this.connections.find((c) => c.name === serverName) ?? null
 
-    // For admin-controlled servers, a shared connection is required
+    // For admin-controlled servers, a shared connection is required — attempt to (re)connect if missing
     if (!sharedConn && accessMode !== 'user-controlled') {
-      throw new Error(`MCP server "${serverName}" not connected.`)
+      const ok = await this.reconnectShared(serverName)
+      if (!ok) throw new Error(`MCP server "${serverName}" not connected.`)
+      sharedConn = this.connections.find((c) => c.name === serverName) ?? null
+      if (!sharedConn) throw new Error(`MCP server "${serverName}" not connected.`)
     }
 
     // Execution guard: reject admin-only tools for non-admin callers
     if (!isAdmin) {
       const access = this.toolAccessMap.get(serverName)
       if (!this.isToolPublic(toolName, access)) {
-        this.logger.warn(`[ACCESS] Non-admin caller attempted to call admin-only tool "${toolName}" on server "${serverName}".`)
+        this.logger.warn(
+          `[ACCESS] Non-admin caller attempted to call admin-only tool "${toolName}" on server "${serverName}".`,
+        )
         return 'This tool requires administrator privileges. Please contact an admin.'
       }
     }
@@ -268,7 +315,23 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
       return 'You need to configure your credentials for this service first. Use the "MCP Server Config" menu option.'
     }
 
-    const result = await conn.client.callTool({ name: toolName, arguments: args })
+    const invoke = async (c: McpConnection) => c.client.callTool({ name: toolName, arguments: args })
+
+    // Only shared (admin-controlled) connections are auto-reconnected here.
+    // Per-user connections are recreated lazily via resolveConnection on next call.
+    const isShared = accessMode !== 'user-controlled'
+    let result
+    try {
+      result = await invoke(conn)
+    } catch (err) {
+      if (!isShared) throw err
+      this.logger.warn(`[MCP] callTool "${serverName}/${toolName}" failed: ${err}. Attempting reconnect and retry...`)
+      const ok = await this.reconnectShared(serverName)
+      if (!ok) throw err
+      const retryConn = this.connections.find((c) => c.name === serverName)
+      if (!retryConn) throw err
+      result = await invoke(retryConn)
+    }
 
     // Extract text content from the result
     if (result.content && Array.isArray(result.content)) {
@@ -341,7 +404,7 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
         transport = new StdioClientTransport({
           command: def.command,
           args,
-          env: def.env ? { ...process.env, ...def.env } as Record<string, string> : undefined,
+          env: def.env ? ({ ...process.env, ...def.env } as Record<string, string>) : undefined,
         })
         break
       }
@@ -357,9 +420,7 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
           throw new Error(`MCP server "${def.name}" with streamable-http transport requires a "url" field.`)
         }
         transport = new StreamableHTTPClientTransport(new URL(def.url), {
-          requestInit: def.headers
-            ? { headers: def.headers }
-            : undefined,
+          requestInit: def.headers ? { headers: def.headers } : undefined,
         })
         break
       }
@@ -369,10 +430,87 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
 
     await client.connect(transport)
     this.connections.push({ name: def.name, client, transport })
+
+    // Attach close/error handlers so we can detect when the remote MCP server
+    // restarts or the transport dies, and drop the stale connection. The next
+    // listTools/callTool will then trigger a reconnect attempt.
+    transport.onclose = () => {
+      const idx = this.connections.findIndex((c) => c.name === def.name && c.transport === transport)
+      if (idx >= 0) {
+        this.connections.splice(idx, 1)
+        this.logger.warn(`[MCP] Transport closed for server "${def.name}". Will reconnect on next use.`)
+      }
+    }
+    transport.onerror = (err: unknown) => {
+      this.logger.warn(`[MCP] Transport error for server "${def.name}": ${err}`)
+    }
+
     // Metadata may already have been registered in onModuleInit; set here as fallback for direct calls
     if (!this.toolAccessMap.has(def.name)) this.toolAccessMap.set(def.name, def.toolAccess)
     if (def.accessMode && !this.accessModeMap.has(def.name)) this.accessModeMap.set(def.name, def.accessMode)
-    this.logger.log(`Connected to MCP server "${def.name}" via ${def.transport}. accessMode=${def.accessMode ?? 'admin-controlled'}, toolAccess: ${def.toolAccess ? `default=${def.toolAccess.default}` : 'none (all public)'}`)
+    this.logger.log(
+      `Connected to MCP server "${def.name}" via ${def.transport}. accessMode=${def.accessMode ?? 'admin-controlled'}, toolAccess: ${def.toolAccess ? `default=${def.toolAccess.default}` : 'none (all public)'}`,
+    )
+  }
+
+  /**
+   * Closes any stale shared connection for the given server and reconnects.
+   * Bumps toolsVersion so LlmService refreshes its tool cache.
+   * Returns true if reconnection succeeded.
+   */
+  private async reconnectShared(serverName: string): Promise<boolean> {
+    // Coalesce concurrent reconnects for the same server so two LLM turns
+    // can't spawn duplicate live transports.
+    const inFlight = this.inFlightReconnects.get(serverName)
+    if (inFlight) return inFlight
+
+    const attempt = this.doReconnectShared(serverName).finally(() => {
+      this.inFlightReconnects.delete(serverName)
+    })
+    this.inFlightReconnects.set(serverName, attempt)
+    return attempt
+  }
+
+  private async doReconnectShared(serverName: string): Promise<boolean> {
+    const def = this.serverDefs.find((d) => d.name === serverName)
+    if (!def) return false
+
+    // Drop every existing connection for this server (may already be gone via onclose)
+    await this.closeSharedConnections(serverName)
+
+    try {
+      await this.connectServer(def)
+    } catch (err) {
+      this.logger.error(`[MCP] Failed to reconnect server "${serverName}": ${err}`)
+      return false
+    }
+
+    // The server may have been removed (BYOMCP removeServer) while we were
+    // connecting. If so, tear down the connection we just created rather than
+    // leaving a callable connection for an unregistered server.
+    if (!this.serverDefs.some((d) => d.name === serverName)) {
+      this.logger.warn(`[MCP] Server "${serverName}" was removed during reconnect; discarding new connection.`)
+      await this.closeSharedConnections(serverName)
+      return false
+    }
+
+    this._toolsVersion++
+    this.logger.log(`[MCP] Reconnected to server "${serverName}" (toolsVersion=${this._toolsVersion}).`)
+    return true
+  }
+
+  /** Closes and removes all shared connections matching the given server name. */
+  private async closeSharedConnections(serverName: string): Promise<void> {
+    // Remove all matches synchronously (no await mid-loop) so a concurrent
+    // same-name transport.onclose splice can't shift indices under us.
+    const stale: McpConnection[] = []
+    for (let i = this.connections.length - 1; i >= 0; i--) {
+      if (this.connections[i].name === serverName) {
+        stale.push(this.connections[i])
+        this.connections.splice(i, 1)
+      }
+    }
+    await Promise.allSettled(stale.map((c) => c.client.close()))
   }
 
   /**
@@ -437,7 +575,9 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
 
       return conn
     } catch (err) {
-      this.logger.error(`[MCP_USER] Failed to create per-user connection for avatar="${avatarName}" server="${serverName}": ${err}`)
+      this.logger.error(
+        `[MCP_USER] Failed to create per-user connection for avatar="${avatarName}" server="${serverName}": ${err}`,
+      )
       return null
     }
   }
@@ -470,7 +610,9 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
     }
     this.serverToolCache.set(serverName, tools)
     this._toolsVersion++
-    this.logger.log(`[MCP] Lazily discovered ${tools.length} tool(s) for server "${serverName}" (toolsVersion=${this._toolsVersion})`)
+    this.logger.log(
+      `[MCP] Lazily discovered ${tools.length} tool(s) for server "${serverName}" (toolsVersion=${this._toolsVersion})`,
+    )
   }
 
   /**
@@ -518,7 +660,11 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(`[MCP_USER] Connection test failed for avatar="${avatarName}" server="${serverName}": ${err}`)
       if (client) {
-        try { await client.close() } catch { /* ignore */ }
+        try {
+          await client.close()
+        } catch {
+          /* ignore */
+        }
       }
       return false
     }
@@ -584,7 +730,9 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
           await this.discoverAndCacheTools(conn, def.name)
         }
       } catch (err) {
-        this.logger.warn(`[MCP_USER] Proactive connection failed for avatar="${avatarName}" server="${def.name}": ${err}`)
+        this.logger.warn(
+          `[MCP_USER] Proactive connection failed for avatar="${avatarName}" server="${def.name}": ${err}`,
+        )
       }
     }
   }
@@ -599,7 +747,9 @@ export class McpService implements OnModuleInit, OnModuleDestroy {
     if (conn) {
       try {
         await conn.client.close()
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       this.userConnections.delete(key)
       this.logger.debug(`[MCP_USER] Invalidated connection for avatar="${avatarName}" server="${serverName}".`)
     }

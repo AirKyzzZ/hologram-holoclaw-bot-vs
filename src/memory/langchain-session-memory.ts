@@ -68,6 +68,13 @@ export class LangchainSessionMemory extends BaseChatMemory {
       await this.memoryService.addMessage(this.sessionId, 'user', userInput)
     }
 
+    // NOTE: upstream #85 also persisted raw intermediate tool steps here so
+    // the LLM could reference them on later turns. That is deliberately NOT
+    // ported: HoloClaw keys memory by workspace (see LlmService), so tool
+    // args/observations — including per-user credentialed MCP results — would
+    // be replayed as system messages to every workspace member. Cross-user
+    // leak + injection surface outweighs the marginal context benefit.
+
     if (aiOutput) {
       this.logger.debug(
         `[saveContext] -> addMessage(role=system) sessionId=${this.sessionId} content="${aiOutput.slice(0, 120)}${aiOutput.length > 120 ? '...' : ''}"`,

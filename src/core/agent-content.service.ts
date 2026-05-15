@@ -104,7 +104,14 @@ export class AgentContentService {
     return this.agentPack?.metadata?.defaultLanguage ?? 'en'
   }
 
-  getMenuItems(): { id: string; labelKey?: string; label?: string; action?: string; visibleWhen?: string; badge?: string }[] {
+  getMenuItems(): {
+    id: string
+    labelKey?: string
+    label?: string
+    action?: string
+    visibleWhen?: string
+    badge?: string
+  }[] {
     const menuItems = this.agentPack?.flows?.menu?.items
     if (Array.isArray(menuItems) && menuItems.length > 0) return menuItems
     return [
@@ -132,6 +139,7 @@ export class AgentContentService {
       enabled: this.toBoolean(authConfig.enabled, true),
       required: this.configService.get<boolean>('appConfig.authRequired') ?? false,
       credentialDefinitionId,
+      issuerServiceDid: this.stripUnresolvedPlaceholder(authConfig.issuerServiceDid),
       userIdentityAttribute: this.configService.get<string>('appConfig.userIdentityAttribute') ?? 'name',
       rolesAttribute: this.configService.get<string>('appConfig.rolesAttribute') || undefined,
       defaultRole: this.configService.get<string>('appConfig.defaultRole') ?? 'user',
@@ -147,6 +155,17 @@ export class AgentContentService {
 
   getUserControlledServer(name: string): McpServerDef | undefined {
     return this.getUserControlledServers().find((s) => s.name === name)
+  }
+
+  /**
+   * Returns undefined when the value is missing or is an unresolved ${ENV}
+   * placeholder (env var not set), so truthiness guards behave correctly.
+   */
+  private stripUnresolvedPlaceholder(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined
+    const trimmed = value.trim()
+    if (!trimmed || /^\$\{[^}]+\}$/.test(trimmed)) return undefined
+    return trimmed
   }
 
   private toBoolean(value: unknown, fallback: boolean) {

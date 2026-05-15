@@ -15,6 +15,7 @@ import {
   ProfileMessage,
   StatEnum,
   TextMessage,
+  InvitationMessage,
   VerifiableCredentialRequestedProofItem,
   VerifiableCredentialSubmittedProofItem,
 } from '@2060.io/vs-agent-nestjs-client'
@@ -508,10 +509,14 @@ export class CoreService implements EventHandler, OnModuleInit {
             'content' in content &&
             typeof (content as Record<string, unknown>).content === 'string'
           ) {
-            const textContent = (content as { content: string }).content.trim()
+            const rawText = (content as { content: string }).content.trim()
+            const threadId = (content as { threadId?: string }).threadId
+            // When the user replies to a specific message, give the LLM that
+            // anchor so it can keep multi-turn references straight.
+            const textContent = threadId ? `[Replying to messageId: ${threadId}] ${rawText}` : rawText
 
             // Guest access check: when auth is required, block unauthenticated messages
-            if (textContent.length > 0 && !session.isAuthenticated && this.authFlowConfig.required) {
+            if (rawText.length > 0 && !session.isAuthenticated && this.authFlowConfig.required) {
               this.logger.log(`[GUEST] Blocked message from unauthenticated user ${connectionId}`)
               await this.sendText(connectionId, this.getText('AUTH_REQUIRED', userLang), userLang)
               break
@@ -520,14 +525,14 @@ export class CoreService implements EventHandler, OnModuleInit {
             // HoloClaw: no active workspace means the user was moved to CHAT
             // by a legacy flow. Bounce them back to LOBBY rather than letting
             // them talk to a connection-scoped LLM.
-            if (textContent.length > 0 && !session.activeWorkspaceId) {
+            if (rawText.length > 0 && !session.activeWorkspaceId) {
               await this.sendText(connectionId, this.getText('WORKSPACE_NOT_IN_WORKSPACE', userLang), userLang)
               session.state = StateStep.LOBBY
               break
             }
 
             // HoloClaw observer guard: observers cannot talk to the LLM.
-            if (textContent.length > 0 && session.activeWorkspaceId) {
+            if (rawText.length > 0 && session.activeWorkspaceId) {
               const ctx = await this.resolveWorkspaceContext(session)
               if (ctx.memberRole === 'observer') {
                 this.logger.log(`[HOLOCLAW] Observer ${this.resolveMemberIdentity(session)} blocked in chat`)
@@ -542,7 +547,7 @@ export class CoreService implements EventHandler, OnModuleInit {
               if (member) await this.memberService.touch(member)
             }
 
-            if (textContent.length > 0) {
+            if (rawText.length > 0) {
               const answer = await this.chatBotService.chat({
                 userInput: textContent,
                 session,
@@ -602,11 +607,28 @@ export class CoreService implements EventHandler, OnModuleInit {
               await this.sendText(connectionId, message, userLang)
             } else if (proofItem?.errorCode) {
               this.logger.warn(`[AUTH] Proof submission failed with error: ${proofItem.errorCode}`)
-              await this.sendText(
-                connectionId,
-                `${this.getText('AUTH_ERROR', userLang)}: ${proofItem.errorCode}`,
-                userLang,
-              )
+
+              if (proofItem.errorCode === 'e.req.no-compatible-credentials' && this.authFlowConfig.issuerServiceDid) {
+                await this.sendText(connectionId, this.getText('AUTH_NO_CREDENTIAL', userLang), userLang)
+                await this.apiClient.messages.send(
+                  new InvitationMessage({
+                    connectionId,
+                    did: this.authFlowConfig.issuerServiceDid,
+                  }),
+                )
+                this.logger.log(
+                  `[AUTH] Sent invitation to issuer service ${this.authFlowConfig.issuerServiceDid} for ${connectionId}`,
+                )
+              } else {
+                await this.sendText(
+                  connectionId,
+                  `${this.getText('AUTH_ERROR', userLang)}: ${proofItem.errorCode}`,
+                  userLang,
+                )
+              }
+
+              session.state = StateStep.CHAT
+              await this.sessionRepository.save(session)
             } else {
               await this.sendText(connectionId, this.getText('WAITING_CREDENTIAL', userLang), userLang)
             }
