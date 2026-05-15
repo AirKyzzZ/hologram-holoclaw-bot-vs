@@ -40,6 +40,7 @@ import { WorkspaceMemberService } from '../workspace/workspace-member.service'
 import { InviteService } from '../workspace/invite.service'
 import { WorkspaceMcpService } from '../workspace/workspace-mcp.service'
 import { BroadcastService } from '../broadcast/broadcast.service'
+import { SttService } from '../stt/stt.service'
 import { WorkspaceEntity } from '../workspace/workspace.entity'
 
 @Injectable()
@@ -64,6 +65,7 @@ export class CoreService implements EventHandler, OnModuleInit {
     private readonly inviteService: InviteService,
     private readonly workspaceMcpService: WorkspaceMcpService,
     private readonly broadcastService: BroadcastService,
+    private readonly sttService: SttService,
   ) {
     const baseUrl = configService.get<string>('appConfig.vsAgentAdminUrl') || 'http://localhost:3001'
     this.apiClient = new ApiClient(baseUrl, ApiVersion.V1)
@@ -154,10 +156,56 @@ export class CoreService implements EventHandler, OnModuleInit {
           }
           break
         }
-        case MediaMessage.type:
-          //inMsg = JsonTransformer.fromJSON(message, MediaMessage)
-          content = 'media'
+        case MediaMessage.type: {
+          const mediaMsg = JsonTransformer.fromJSON(message, MediaMessage)
+          const audioItem = mediaMsg.items?.find((item) => this.sttService.isAudioMimeType(item.mimeType))
+
+          if (audioItem && this.sttService.isEnabled) {
+            if (!this.sttService.isAllowed(session.isAuthenticated ?? false)) {
+              this.logger.log(`[STT] Blocked voice note from unauthenticated user ${session.connectionId}`)
+              await this.sendText(session.connectionId, this.getText('VOICE_AUTH_REQUIRED', session.lang), session.lang)
+              break
+            }
+            try {
+              const result = await this.sttService.transcribeFromUrl(
+                audioItem.uri,
+                audioItem.mimeType,
+                audioItem.ciphering,
+              )
+              const text = result.text.trim()
+              if (text.length === 0) {
+                this.logger.log(`[STT] Empty transcript for voice note from ${session.connectionId}`)
+                await this.sendText(
+                  session.connectionId,
+                  this.getText('VOICE_TRANSCRIPTION_EMPTY', session.lang),
+                  session.lang,
+                )
+                break
+              }
+              content = new TextMessage({
+                connectionId: message.connectionId,
+                content: `[Voice note] ${text}`,
+                ...(message.threadId ? { threadId: message.threadId } : {}),
+              })
+            } catch (err) {
+              this.logger.error(`[STT] Transcription failed: ${err}`)
+              await this.sendText(session.connectionId, this.getText('ERROR_MESSAGES', session.lang), session.lang)
+            }
+            break
+          }
+
+          // Non-audio media (or STT disabled): hand the LLM a bounded text
+          // stub so it still has context for what the user sent.
+          {
+            const desc = (mediaMsg.items ?? []).map((it) => it.mimeType).join(', ')
+            content = new TextMessage({
+              connectionId: message.connectionId,
+              content: `[Media received: ${desc || 'unknown'}]`,
+              ...(message.threadId ? { threadId: message.threadId } : {}),
+            })
+          }
           break
+        }
         case ProfileMessage.type: {
           const inMsg = JsonTransformer.fromJSON(message, ProfileMessage) as unknown as ProfileMessage
           if (inMsg.preferredLanguage) {
@@ -473,11 +521,7 @@ export class CoreService implements EventHandler, OnModuleInit {
             // by a legacy flow. Bounce them back to LOBBY rather than letting
             // them talk to a connection-scoped LLM.
             if (textContent.length > 0 && !session.activeWorkspaceId) {
-              await this.sendText(
-                connectionId,
-                this.getText('WORKSPACE_NOT_IN_WORKSPACE', userLang),
-                userLang,
-              )
+              await this.sendText(connectionId, this.getText('WORKSPACE_NOT_IN_WORKSPACE', userLang), userLang)
               session.state = StateStep.LOBBY
               break
             }
@@ -487,11 +531,7 @@ export class CoreService implements EventHandler, OnModuleInit {
               const ctx = await this.resolveWorkspaceContext(session)
               if (ctx.memberRole === 'observer') {
                 this.logger.log(`[HOLOCLAW] Observer ${this.resolveMemberIdentity(session)} blocked in chat`)
-                await this.sendText(
-                  connectionId,
-                  this.getText('WORKSPACE_OBSERVER_READONLY', userLang),
-                  userLang,
-                )
+                await this.sendText(connectionId, this.getText('WORKSPACE_OBSERVER_READONLY', userLang), userLang)
                 break
               }
               // Update lastSeenAt for presence tracking
@@ -997,9 +1037,7 @@ export class CoreService implements EventHandler, OnModuleInit {
 
       await this.sendText(
         connectionId,
-        this.getText('WORKSPACE_JOIN_SUCCESS', lang)
-          .replace('{name}', workspace.name)
-          .replace('{role}', invite.role),
+        this.getText('WORKSPACE_JOIN_SUCCESS', lang).replace('{name}', workspace.name).replace('{role}', invite.role),
         lang,
       )
 
@@ -1141,11 +1179,7 @@ export class CoreService implements EventHandler, OnModuleInit {
     session.workspaceFlowStep = 'name'
     session.workspaceFlowData = {}
     await this.sessionRepository.save(session)
-    await this.sendText(
-      session.connectionId,
-      this.getText('WORKSPACE_ADD_MCP_PROMPT_NAME', session.lang),
-      session.lang,
-    )
+    await this.sendText(session.connectionId, this.getText('WORKSPACE_ADD_MCP_PROMPT_NAME', session.lang), session.lang)
   }
 
   private async handleAddMcpServerInput(text: string, session: SessionEntity): Promise<void> {
@@ -1205,9 +1239,7 @@ export class CoreService implements EventHandler, OnModuleInit {
       if (failureMessage) {
         await this.sendText(
           connectionId,
-          this.getText('WORKSPACE_ADD_MCP_FAILED', lang)
-            .replace('{name}', name)
-            .replace('{reason}', failureMessage),
+          this.getText('WORKSPACE_ADD_MCP_FAILED', lang).replace('{name}', name).replace('{reason}', failureMessage),
           lang,
         )
       }

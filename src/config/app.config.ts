@@ -315,15 +315,25 @@ export default registerAs('appConfig', () => ({
     workspaces: {
       multiTenant: pickBoolean('HOLOCLAW_MULTI_TENANT', agentPack?.holoclaw?.workspaces?.multiTenant, true),
       maxPerOwner: pickNumber('HOLOCLAW_MAX_WORKSPACES_PER_OWNER', agentPack?.holoclaw?.workspaces?.maxPerOwner, 10),
-      nameMaxLength: pickNumber('HOLOCLAW_WORKSPACE_NAME_MAX_LENGTH', agentPack?.holoclaw?.workspaces?.nameMaxLength, 120),
+      nameMaxLength: pickNumber(
+        'HOLOCLAW_WORKSPACE_NAME_MAX_LENGTH',
+        agentPack?.holoclaw?.workspaces?.nameMaxLength,
+        120,
+      ),
     },
     invites: {
       tokenTTLHours: pickNumber('HOLOCLAW_INVITE_TTL_HOURS', agentPack?.holoclaw?.invites?.tokenTTLHours, 168),
-      defaultRole: pickString('HOLOCLAW_INVITE_DEFAULT_ROLE', agentPack?.holoclaw?.invites?.defaultRole, 'collaborator'),
+      defaultRole: pickString(
+        'HOLOCLAW_INVITE_DEFAULT_ROLE',
+        agentPack?.holoclaw?.invites?.defaultRole,
+        'collaborator',
+      ),
       allowedRoles:
         (agentPack?.holoclaw?.invites?.allowedRoles as string[] | undefined) ??
         (process.env.HOLOCLAW_INVITE_ALLOWED_ROLES
-          ? process.env.HOLOCLAW_INVITE_ALLOWED_ROLES.split(',').map((s) => s.trim()).filter(Boolean)
+          ? process.env.HOLOCLAW_INVITE_ALLOWED_ROLES.split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
           : ['collaborator', 'observer', 'approver']),
     },
     llmBudget: {
@@ -356,7 +366,24 @@ export default registerAs('appConfig', () => ({
     speakerTags: {
       enabled: pickBoolean('HOLOCLAW_SPEAKER_TAGS_ENABLED', agentPack?.holoclaw?.speakerTags?.enabled, true),
       // Format: {identity} and {role} are replaced at runtime.
-      format: pickString('HOLOCLAW_SPEAKER_TAGS_FORMAT', agentPack?.holoclaw?.speakerTags?.format, '[{identity}:{role}]: '),
+      format: pickString(
+        'HOLOCLAW_SPEAKER_TAGS_FORMAT',
+        agentPack?.holoclaw?.speakerTags?.format,
+        '[{identity}:{role}]: ',
+      ),
     },
   },
+
+  // Speech-to-Text Configuration
+  sttProvider: agentPack?.speechToText?.provider
+    ? (agentPack.speechToText.provider as {
+        name: string
+        type: string
+        model?: string
+        apiKeyEnv?: string
+        baseUrl?: string
+        language?: string
+      })
+    : undefined,
+  sttRequireAuth: pickBoolean('STT_REQUIRE_AUTH', agentPack?.speechToText?.requireAuth, false),
 }))

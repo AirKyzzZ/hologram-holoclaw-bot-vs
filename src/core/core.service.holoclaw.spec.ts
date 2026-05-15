@@ -18,6 +18,7 @@ import { WorkspaceMemberService } from '../workspace/workspace-member.service'
 import { InviteService } from '../workspace/invite.service'
 import { WorkspaceMcpService } from '../workspace/workspace-mcp.service'
 import { BroadcastService } from '../broadcast/broadcast.service'
+import { SttService } from '../stt/stt.service'
 import { WorkspaceEntity } from '../workspace/workspace.entity'
 import { WorkspaceMemberEntity } from '../workspace/workspace-member.entity'
 
@@ -171,6 +172,15 @@ describe('CoreService — HoloClaw workspace flows', () => {
         },
         { provide: WorkspaceMcpService, useValue: { add: jest.fn() } },
         { provide: BroadcastService, useValue: broadcast },
+        {
+          provide: SttService,
+          useValue: {
+            isEnabled: false,
+            isAudioMimeType: jest.fn().mockReturnValue(false),
+            isAllowed: jest.fn().mockReturnValue(false),
+            transcribeFromUrl: jest.fn(),
+          },
+        },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile()

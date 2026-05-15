@@ -4,8 +4,7 @@
 export const DEFAULT_TRANSLATIONS: Record<string, Record<string, string>> = {
   en: {
     // HoloClaw — lobby & workspace flow
-    LOBBY_WELCOME:
-      '👋 Welcome to HoloClaw! Create a new workspace or paste an invite token to join an existing one.',
+    LOBBY_WELCOME: '👋 Welcome to HoloClaw! Create a new workspace or paste an invite token to join an existing one.',
     LOBBY_NO_ACTIONS: 'Use the menu to create or join a workspace.',
     CREATE_WORKSPACE: 'Create workspace',
     JOIN_WORKSPACE: 'Join with invite',
@@ -28,7 +27,8 @@ export const DEFAULT_TRANSLATIONS: Record<string, Record<string, string>> = {
     WORKSPACE_SWITCH_SUCCESS: '✅ Active workspace: "{name}".',
     WORKSPACE_LEAVE_SUCCESS: '👋 Left workspace. You are back in the lobby.',
     WORKSPACE_INVITE_ROLE_PROMPT: 'Which role should this invite grant? (collaborator / observer / approver)',
-    WORKSPACE_INVITE_CREATED: '🎫 Here\'s your single-use invite token (valid for {hours}h, role: {role}):\n\n{token}\n\nShare it out-of-band. Invitees paste it after using "Join with invite".',
+    WORKSPACE_INVITE_CREATED:
+      '🎫 Here\'s your single-use invite token (valid for {hours}h, role: {role}):\n\n{token}\n\nShare it out-of-band. Invitees paste it after using "Join with invite".',
     WORKSPACE_OBSERVER_READONLY:
       '👁️ You are in observer mode. Ask an admin for collaborator access to interact with the AI.',
     WORKSPACE_NOT_IN_WORKSPACE: 'You need to create or join a workspace first.',
@@ -53,11 +53,15 @@ export const DEFAULT_TRANSLATIONS: Record<string, Record<string, string>> = {
     AUTH_PROCESS_STARTED: 'Authentication process has started. Please respond to the credential request.',
     STATS_ERROR: 'Sorry, we could not retrieve your statistics at the moment.',
     ERROR_MESSAGES: 'The service is not available at the moment. Please try again later.',
+    VOICE_AUTH_REQUIRED: 'Voice messages require authentication. Please authenticate first to use this feature.',
+    VOICE_TRANSCRIPTION_EMPTY:
+      "I couldn't make out anything in that voice note. Could you try again or type your message?",
     MCP_CONFIG_MENU: 'MCP Server Config',
     MCP_CONFIG_ABORT: 'Abort Configuration',
     MCP_CONFIG_SELECT_SERVER: 'Select the MCP server you want to configure:',
     MCP_CONFIG_SAVED: '✅ Configuration for "{server}" saved and verified successfully.',
-    MCP_CONFIG_INVALID: '⚠️ Connection test failed for "{server}". The credentials may be invalid. Please try configuring again.',
+    MCP_CONFIG_INVALID:
+      '⚠️ Connection test failed for "{server}". The credentials may be invalid. Please try configuring again.',
     MCP_CONFIG_ERROR: 'An error occurred while saving configuration. Please try again.',
     MCP_CONFIG_ABORTED: 'Configuration cancelled.',
     MY_APPROVAL_REQUESTS: 'Approval requests',
@@ -80,24 +84,30 @@ export const DEFAULT_TRANSLATIONS: Record<string, Record<string, string>> = {
     AUTH_PROCESS_STARTED: 'El proceso de autenticación ha comenzado. Por favor, responde a la solicitud de credencial.',
     STATS_ERROR: 'Lo sentimos, no pudimos obtener tus estadísticas en este momento.',
     ERROR_MESSAGES: 'El servicio no está disponible en este momento. Por favor, intenta de nuevo más tarde.',
+    VOICE_AUTH_REQUIRED:
+      'Los mensajes de voz requieren autenticación. Por favor, autentícate primero para usar esta función.',
+    VOICE_TRANSCRIPTION_EMPTY:
+      'No pude entender nada en esa nota de voz. ¿Podrías intentarlo de nuevo o escribir tu mensaje?',
     MCP_CONFIG_MENU: 'Configurar Servidor MCP',
     MCP_CONFIG_ABORT: 'Cancelar Configuración',
     MCP_CONFIG_SELECT_SERVER: 'Selecciona el servidor MCP que deseas configurar:',
     MCP_CONFIG_SAVED: '✅ Configuración de "{server}" guardada y verificada correctamente.',
-    MCP_CONFIG_INVALID: '⚠️ La prueba de conexión falló para "{server}". Las credenciales pueden ser inválidas. Por favor, intenta configurar de nuevo.',
+    MCP_CONFIG_INVALID:
+      '⚠️ La prueba de conexión falló para "{server}". Las credenciales pueden ser inválidas. Por favor, intenta configurar de nuevo.',
     MCP_CONFIG_ERROR: 'Ocurrió un error al guardar la configuración. Por favor, inténtalo de nuevo.',
     MCP_CONFIG_ABORTED: 'Configuración cancelada.',
     MY_APPROVAL_REQUESTS: 'Solicitudes de aprobación',
     MY_APPROVAL_REQUESTS_PROMPT: 'Tus solicitudes de aprobación pendientes. Selecciona una para cancelarla:',
     NO_APPROVAL_REQUESTS: 'No tienes solicitudes de aprobación pendientes.',
     PENDING_APPROVALS: 'Aprobaciones pendientes',
-    PENDING_APPROVALS_PROMPT: 'Solicitudes de aprobación pendientes que puedes revisar. Selecciona una para aprobar o rechazar:',
+    PENDING_APPROVALS_PROMPT:
+      'Solicitudes de aprobación pendientes que puedes revisar. Selecciona una para aprobar o rechazar:',
     NO_PENDING_APPROVALS: 'No hay aprobaciones pendientes para ti.',
   },
   fr: {
     // HoloClaw — flux lobby & workspace
     LOBBY_WELCOME:
-      '👋 Bienvenue sur HoloClaw ! Crée un nouveau workspace ou colle un code d\'invitation pour rejoindre un workspace existant.',
+      "👋 Bienvenue sur HoloClaw ! Crée un nouveau workspace ou colle un code d'invitation pour rejoindre un workspace existant.",
     LOBBY_NO_ACTIONS: 'Utilise le menu pour créer ou rejoindre un workspace.',
     CREATE_WORKSPACE: 'Créer un workspace',
     JOIN_WORKSPACE: 'Rejoindre avec un code',
@@ -111,23 +121,25 @@ export const DEFAULT_TRANSLATIONS: Record<string, Record<string, string>> = {
       '✅ Workspace "{name}" créé. Tu en es maintenant propriétaire. Envoie un message pour discuter, ou utilise le menu pour inviter des membres et ajouter des outils.',
     WORKSPACE_CREATE_ABORTED: 'Création du workspace annulée.',
     WORKSPACE_NAME_EMPTY: 'Le nom du workspace ne peut pas être vide. Réessaie.',
-    WORKSPACE_JOIN_PROMPT: '🎫 Colle ton code d\'invitation pour rejoindre un workspace :',
+    WORKSPACE_JOIN_PROMPT: "🎫 Colle ton code d'invitation pour rejoindre un workspace :",
     WORKSPACE_JOIN_SUCCESS: '✅ Tu as rejoint le workspace "{name}" en tant que {role}.',
-    WORKSPACE_JOIN_INVALID: '❌ Code d\'invitation invalide ou expiré. Demande un nouveau code à un admin.',
+    WORKSPACE_JOIN_INVALID: "❌ Code d'invitation invalide ou expiré. Demande un nouveau code à un admin.",
     WORKSPACE_JOIN_BROADCAST: '👋 [{identity}] a rejoint en tant que {role}.',
     WORKSPACE_SWITCH_PROMPT: 'Sélectionne un workspace :',
-    WORKSPACE_SWITCH_NONE: 'Tu n\'es membre d\'aucun workspace pour le moment.',
+    WORKSPACE_SWITCH_NONE: "Tu n'es membre d'aucun workspace pour le moment.",
     WORKSPACE_SWITCH_SUCCESS: '✅ Workspace actif : "{name}".',
     WORKSPACE_LEAVE_SUCCESS: '👋 Workspace quitté. Tu es de retour dans le lobby.',
     WORKSPACE_INVITE_ROLE_PROMPT: 'Quel rôle ce code doit-il accorder ? (collaborator / observer / approver)',
-    WORKSPACE_INVITE_CREATED: '🎫 Voici ton code d\'invitation à usage unique (valide {hours}h, rôle : {role}) :\n\n{token}\n\nPartage-le hors-canal. L\'invité le colle après avoir choisi "Rejoindre avec un code".',
+    WORKSPACE_INVITE_CREATED:
+      '🎫 Voici ton code d\'invitation à usage unique (valide {hours}h, rôle : {role}) :\n\n{token}\n\nPartage-le hors-canal. L\'invité le colle après avoir choisi "Rejoindre avec un code".',
     WORKSPACE_OBSERVER_READONLY:
-      '👁️ Tu es en mode observateur. Demande à un admin un accès collaborator pour interagir avec l\'IA.',
-    WORKSPACE_NOT_IN_WORKSPACE: 'Tu dois d\'abord créer ou rejoindre un workspace.',
+      "👁️ Tu es en mode observateur. Demande à un admin un accès collaborator pour interagir avec l'IA.",
+    WORKSPACE_NOT_IN_WORKSPACE: "Tu dois d'abord créer ou rejoindre un workspace.",
     WORKSPACE_NOT_ADMIN: 'Seul le propriétaire du workspace peut faire cela.',
     WORKSPACE_ADD_MCP_PROMPT_NAME: '🔧 Donne un nom court à ce serveur MCP (ex. "github") :',
     WORKSPACE_ADD_MCP_PROMPT_URL: '🌐 URL du serveur MCP (https://… pour streamable-http, ou "sse://…" pour SSE) :',
-    WORKSPACE_ADD_MCP_PROMPT_HEADER: '🔑 Valeur optionnelle de l\'en-tête d\'auth (ex. "Bearer ghp_…") ou envoie "skip" :',
+    WORKSPACE_ADD_MCP_PROMPT_HEADER:
+      '🔑 Valeur optionnelle de l\'en-tête d\'auth (ex. "Bearer ghp_…") ou envoie "skip" :',
     WORKSPACE_ADD_MCP_SUCCESS: '✅ Serveur MCP "{name}" ajouté ({tools} outils découverts).',
     WORKSPACE_ADD_MCP_FAILED: '❌ Échec de connexion à "{name}" : {reason}',
     WORKSPACE_ADD_MCP_EXISTS: '⚠️ Un serveur nommé "{name}" existe déjà dans ce workspace.',
@@ -145,18 +157,24 @@ export const DEFAULT_TRANSLATIONS: Record<string, Record<string, string>> = {
     AUTH_PROCESS_STARTED: "Le processus d'authentification a commencé. Veuillez répondre à la demande de justificatif.",
     STATS_ERROR: "Désolé, nous n'avons pas pu récupérer vos statistiques pour le moment.",
     ERROR_MESSAGES: "Le service n'est pas disponible pour le moment. Veuillez réessayer plus tard.",
+    VOICE_AUTH_REQUIRED:
+      "Les messages vocaux nécessitent une authentification. Veuillez vous authentifier d'abord pour utiliser cette fonctionnalité.",
+    VOICE_TRANSCRIPTION_EMPTY:
+      "Je n'ai rien pu comprendre dans ce message vocal. Pourriez-vous réessayer ou écrire votre message ?",
     MCP_CONFIG_MENU: 'Configurer Serveur MCP',
     MCP_CONFIG_ABORT: 'Annuler la Configuration',
     MCP_CONFIG_SELECT_SERVER: 'Sélectionnez le serveur MCP que vous souhaitez configurer :',
     MCP_CONFIG_SAVED: '✅ Configuration de "{server}" enregistrée et vérifiée avec succès.',
-    MCP_CONFIG_INVALID: '⚠️ Le test de connexion a échoué pour "{server}". Les identifiants sont peut-être invalides. Veuillez réessayer la configuration.',
+    MCP_CONFIG_INVALID:
+      '⚠️ Le test de connexion a échoué pour "{server}". Les identifiants sont peut-être invalides. Veuillez réessayer la configuration.',
     MCP_CONFIG_ERROR: "Une erreur est survenue lors de l'enregistrement. Veuillez réessayer.",
     MCP_CONFIG_ABORTED: 'Configuration annulée.',
     MY_APPROVAL_REQUESTS: "Demandes d'approbation",
     MY_APPROVAL_REQUESTS_PROMPT: "Vos demandes d'approbation en attente. Sélectionnez-en une pour l'annuler :",
     NO_APPROVAL_REQUESTS: "Vous n'avez aucune demande d'approbation en attente.",
     PENDING_APPROVALS: 'Approbations en attente',
-    PENDING_APPROVALS_PROMPT: "Demandes d'approbation en attente que vous pouvez traiter. Sélectionnez-en une pour approuver ou rejeter :",
+    PENDING_APPROVALS_PROMPT:
+      "Demandes d'approbation en attente que vous pouvez traiter. Sélectionnez-en une pour approuver ou rejeter :",
     NO_PENDING_APPROVALS: "Il n'y a pas d'approbations en attente pour vous.",
   },
 }

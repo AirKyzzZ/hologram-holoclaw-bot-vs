@@ -157,6 +157,17 @@ holoclaw:
     enabled: true
     format: '[{identity}:{role}]: '
 
+# Speech-to-text: transcribe incoming voice notes so HoloClaw can act on them.
+# Remove this section (or the provider) to disable transcription entirely.
+speechToText:
+  requireAuth: false
+  provider:
+    name: whisper
+    type: openai-whisper
+    model: whisper-1
+    # apiKeyEnv defaults to OPENAI_API_KEY. Set baseUrl for a self-hosted
+    # Whisper-compatible endpoint.
+
 integrations:
   vsAgent:
     adminUrl: ${VS_AGENT_ADMIN_URL}
