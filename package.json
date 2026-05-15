@@ -1,6 +1,6 @@
 {
   "name": "hologram-holoclaw-bot-vs",
-  "version": "0.1.0",
+  "version": "1.12.0",
   "description": "HoloClaw — multiplayer AI workspace bot for Hologram. Forked from hologram-generic-ai-agent-vs.",
   "author": "Maxime Mansiet",
   "private": true,
